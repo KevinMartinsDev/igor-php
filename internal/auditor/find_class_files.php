@@ -47,4 +47,4 @@ foreach ($classesToCheck as $class => $_) {
     } catch (Throwable $e) {}
 }
 
-echo json_encode($mapping);
+echo json_encode((object)$mapping);
