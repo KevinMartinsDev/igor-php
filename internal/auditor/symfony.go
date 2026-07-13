@@ -165,12 +165,29 @@ func (b *SymfonyBridge) locateFilesViaReflection(jsonPart string) error {
 	reflectCmd := exec.Command("php", tmpHelper.Name(), b.Root)
 	reflectCmd.Stdin = bytes.NewReader([]byte(jsonPart))
 
-	reflectOutput, err := reflectCmd.CombinedOutput()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	reflectCmd.Stdout = &stdout
+	reflectCmd.Stderr = &stderr
+
+	err = reflectCmd.Run()
 	if err != nil {
-		return fmt.Errorf("failed to locate files via reflection: %v", err)
+		return fmt.Errorf("failed to locate files via reflection: %v (stderr: %s)", err, stderr.String())
 	}
 
-	if err := json.Unmarshal(reflectOutput, &b.ClassToFile); err != nil {
+	strOutput := stdout.String()
+	start := strings.Index(strOutput, "{")
+	end := strings.LastIndex(strOutput, "}")
+	if start == -1 || end == -1 || end < start {
+		// Fallback to try unmarshaling the entire stdout if no braces found (highly unlikely if it ran successfully)
+		if err := json.Unmarshal(stdout.Bytes(), &b.ClassToFile); err != nil {
+			return fmt.Errorf("failed to parse reflection mapping (no JSON object found in output: %q): %v", strOutput, err)
+		}
+		return nil
+	}
+
+	cleanJson := strOutput[start : end+1]
+	if err := json.Unmarshal([]byte(cleanJson), &b.ClassToFile); err != nil {
 		return fmt.Errorf("failed to parse reflection mapping: %v", err)
 	}
 

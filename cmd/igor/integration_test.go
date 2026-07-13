@@ -102,6 +102,57 @@ func TestSymfonyIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("Bridge should survive PHP deprecations or warnings during reflection", func(t *testing.T) {
+		requirePHP(t)
+
+		noiseAutoloader := `<?php
+fwrite(STDERR, "PHP Deprecated:  Some deprecated library feature in autoload\n");
+echo "Psr\\Log\\InvalidArgumentException is loaded\n";
+
+spl_autoload_register(function ($class) {
+    if ($class === 'App\\Service\\MyService') {
+        require_once '` + servicePath + `';
+    }
+});
+`
+		if err := os.WriteFile(filepath.Join(tmpDir, "vendor", "autoload.php"), []byte(noiseAutoloader), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		defer func() {
+			originalAutoloader := `<?php
+spl_autoload_register(function ($class) {
+    if ($class === 'App\\Service\\MyService') {
+        require_once '` + servicePath + `';
+    }
+});
+`
+			_ = os.WriteFile(filepath.Join(tmpDir, "vendor", "autoload.php"), []byte(originalAutoloader), 0644);
+		}()
+
+		bridge := auditor.NewSymfonyBridge(tmpDir, "bin/console", config.Config{NoAgent: true})
+		err := bridge.LoadContainer("prod")
+		if err != nil {
+			t.Fatalf("LoadContainer failed with stdout/stderr noise: %v", err)
+		}
+
+		if bridge.Container == nil {
+			t.Fatal("Expected container to be loaded")
+		}
+
+		filePath, found := bridge.ClassToFile["App\\Service\\MyService"]
+		if !found {
+			t.Fatal("Expected App\\Service\\MyService to be located via reflection even with noise")
+		}
+
+		realServicePath, _ := filepath.EvalSymlinks(servicePath)
+		realLocatedPath, _ := filepath.EvalSymlinks(filePath)
+
+		if realLocatedPath != realServicePath {
+			t.Errorf("Expected path %s, got %s", realServicePath, realLocatedPath)
+		}
+	})
+
 	t.Run("Bridge should support custom console path", func(t *testing.T) {
 		requirePHP(t)
 		customBinDir := filepath.Join(tmpDir, "app")
