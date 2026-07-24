@@ -24,6 +24,10 @@ func (m *mockEngine) IsSafeNamespace(className string) bool {
 	return false
 }
 
+func (m *mockEngine) IsResettable(className string) bool {
+	return className == "Xynnn\\GoogleTagManagerBundle\\Service\\GoogleTagManagerInterface" || className == "App\\Service\\ResettableService"
+}
+
 func TestPHPVisitor_Mutation(t *testing.T) {
 	code := `<?php
 class MyService {
@@ -102,3 +106,113 @@ class MyService implements Symfony\Contracts\Service\ResetInterface {
 		t.Error("Expected a WARNING finding for missing reset in ResetInterface")
 	}
 }
+
+func TestPHPVisitor_DetectSingletonMutationRule(t *testing.T) {
+	code := `<?php
+class MyService {
+    private $googleTagManager;
+    public function set($v) {
+        $this->googleTagManager->addPush([
+            'event' => 'userEmailCaptured',
+        ]);
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	found := false
+	expectedMsg := "Mutation detected on an injected dependency ($this->googleTagManager). Risk of State Leak in a worker."
+	for _, f := range findings {
+		if f.Severity == "ERROR" && f.Message == expectedMsg {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected an ERROR finding with message: %q, got: %v", expectedMsg, findings)
+	}
+}
+
+func TestPHPVisitor_DetectClosureStateLeakRule(t *testing.T) {
+	code := `<?php
+class MyService {
+    private $dispatcher;
+    public function createGtmCookie($event) {
+        $family = 'test';
+        $optin = true;
+        $this->dispatcher->addListener('response', function ($event) use ($family, $optin) {
+            // leak
+        });
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	found := false
+	expectedMsg := "Potential Memory Leak: Injection of a closure capturing local state into a shared service."
+	for _, f := range findings {
+		if f.Severity == "ERROR" && f.Message == expectedMsg {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected an ERROR finding with message: %q, got: %v", expectedMsg, findings)
+	}
+}
+
+func TestPHPVisitor_DetectSingletonMutationRule_BypassedIfResettable(t *testing.T) {
+	code := `<?php
+namespace App\Listener;
+
+use Xynnn\GoogleTagManagerBundle\Service\GoogleTagManagerInterface;
+
+class MyListener {
+    private GoogleTagManagerInterface $googleTagManager;
+    
+    public function set($v) {
+        $this->googleTagManager->addPush([
+            'event' => 'userEmailCaptured',
+        ]);
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	if len(findings) != 0 {
+		t.Errorf("Expected 0 findings because the dependency is resettable, got: %v", findings)
+	}
+}
+
