@@ -494,7 +494,7 @@ func (v *PHPVisitor) hasAttribute(n *sitter.Node, target string) bool {
 	return false
 }
 
-// handleMethodCall intercepte et analyse les appels de méthodes (ex: $this->dispatcher->addListener() ou $this->googleTagManager->addPush()).
+// handleMethodCall intercepts and analyzes method calls (e.g., $this->dispatcher->addListener() or $this->googleTagManager->addPush()).
 func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 	if n == nil {
 		return
@@ -505,7 +505,7 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		fullName = v.namespace + "\\" + v.curClass
 	}
 
-	// Si le service est explicitement transient (non partagé), les mutations sont acceptées
+	// If the service is explicitly transient (non-shared), mutations are accepted
 	if v.nonSharedServices[strings.TrimPrefix(fullName, "\\")] {
 		return
 	}
@@ -513,7 +513,7 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		return
 	}
 
-	// 1. Récupération de l'objet récepteur de l'appel et du nom de la méthode
+	// 1. Retrieve the calling receiver object and the method name
 	obj := n.ChildByFieldName("object")
 	if obj == nil {
 		return
@@ -525,16 +525,16 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 	}
 	methodName := v.getContent(nameNode)
 
-	// 2. Vérification si l'objet est une propriété de la classe courante ($this->nomDePropriete)
+	// 2. Check if the object is a property of the current class ($this->propertyName)
 	propName, isProp := v.isPropertyFetchOnThis(obj)
 	if !isProp {
 		return
 	}
 
-	// --- Règle 1 : DetectSingletonMutationRule ---
-	// Si le nom de la méthode commence par un préfixe de mutation (add, set, push, register, append)
+	// --- Rule 1: DetectSingletonMutationRule ---
+	// If the method name starts with a mutation prefix (add, set, push, register, append)
 	if hasMutationPrefix(methodName) {
-		// Vérifie si le type injecté implémente la ResetInterface dans le conteneur Symfony
+		// Check if the injected type implements ResetInterface in the Symfony container
 		isResettable := false
 		if typeName, ok := v.propertyTypes[propName]; ok {
 			fqcn := v.resolveFQCN(typeName)
@@ -549,8 +549,8 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		}
 	}
 
-	// --- Règle 2 : DetectClosureStateLeakRule ---
-	// Parcourir les arguments de la méthode pour trouver d'éventuelles fonctions anonymes qui capturent des variables locales
+	// --- Rule 2: DetectClosureStateLeakRule ---
+	// Walk the method arguments to find potential anonymous functions capturing local variables
 	argsNode := n.ChildByFieldName("arguments")
 	if argsNode != nil {
 		var findClosures func(*sitter.Node)
@@ -558,15 +558,15 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 			if node == nil {
 				return
 			}
-			// Si le nœud est une fonction anonyme (closure)
+			// If the node is an anonymous function (closure)
 			if node.Kind() == "anonymous_function" {
-				// Et qu'elle possède une clause de capture "use" (use ($var))
+				// And it has a "use" capture clause (use ($var))
 				if hasUseClause(node) {
 					msg := "Potential Memory Leak: Injection of a closure capturing local state into a shared service."
 					v.addFinding(node, msg, "Avoid injecting closures that capture local state via use() into shared services.", "ERROR")
 				}
 			}
-			// Parcours récursif des enfants du nœud argument (ex: dans un tableau imbriqué)
+			// Recursive walk of argument node children (e.g., in a nested array)
 			for i := uint(0); i < node.ChildCount(); i++ {
 				findClosures(node.Child(i))
 			}
@@ -575,7 +575,7 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 	}
 }
 
-// isPropertyFetchOnThis vérifie si un nœud correspond à une propriété de la classe courante via $this (ex: $this->propertyName)
+// isPropertyFetchOnThis checks if a node is a property of the current class via $this (e.g., $this->propertyName)
 func (v *PHPVisitor) isPropertyFetchOnThis(n *sitter.Node) (string, bool) {
 	if n == nil {
 		return "", false
@@ -588,7 +588,7 @@ func (v *PHPVisitor) isPropertyFetchOnThis(n *sitter.Node) (string, bool) {
 		return "", false
 	}
 	objContent := v.getContent(obj)
-	// Vérifie si l'accès est fait sur l'objet $this
+	// Check if the access is made on the $this object
 	if !strings.Contains(objContent, "$this") {
 		return "", false
 	}
@@ -599,12 +599,12 @@ func (v *PHPVisitor) isPropertyFetchOnThis(n *sitter.Node) (string, bool) {
 	return v.getContent(nameNode), true
 }
 
-// hasMutationPrefix vérifie si le nom de la méthode commence par un préfixe de mutation standard
+// hasMutationPrefix checks if the method name starts with a standard mutation prefix
 func hasMutationPrefix(methodName string) bool {
 	prefixes := []string{"add", "set", "push", "register", "append"}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(methodName, prefix) {
-			// On vérifie que le préfixe soit bien délimité (ex: camelCase/PascalCase) pour éviter des faux positifs comme "settle" ou "address"
+			// Ensure the prefix is properly bounded (e.g., camelCase/PascalCase) to avoid false positives like "settle" or "address"
 			if len(methodName) == len(prefix) {
 				return true
 			}
@@ -620,7 +620,7 @@ func hasMutationPrefix(methodName string) bool {
 	return false
 }
 
-// hasUseClause vérifie si une fonction anonyme possède une clause de capture "use (...)"
+// hasUseClause checks if an anonymous function has a "use (...)" capture clause
 func hasUseClause(node *sitter.Node) bool {
 	for i := uint(0); i < node.ChildCount(); i++ {
 		if node.Child(i).Kind() == "anonymous_function_use_clause" {
@@ -630,7 +630,7 @@ func hasUseClause(node *sitter.Node) bool {
 	return false
 }
 
-// scanPropertyTypes extrait récursivement les type-hints des propriétés de la classe et des paramètres promus du constructeur.
+// scanPropertyTypes recursively extracts type-hints of class properties and promoted constructor parameters.
 func (v *PHPVisitor) scanPropertyTypes(classNode *sitter.Node) {
 	body := classNode.ChildByFieldName("body")
 	if body == nil {
@@ -686,13 +686,13 @@ func (v *PHPVisitor) scanPropertyTypes(classNode *sitter.Node) {
 	}
 }
 
-// resolveFQCN résout le nom de classe complet (Fully Qualified Class Name) d'un type-hint en scannant les "use" imports du fichier.
+// resolveFQCN resolves the Fully Qualified Class Name (FQCN) of a type-hint by scanning the "use" imports of the file.
 func (v *PHPVisitor) resolveFQCN(typeName string) string {
 	if strings.HasPrefix(typeName, "\\") {
 		return strings.TrimPrefix(typeName, "\\")
 	}
 
-	// 1. Recherche parmi les imports "use" du fichier courant
+	// 1. Search among the "use" imports of the current file
 	for _, line := range v.lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "use ") && strings.HasSuffix(line, ";") {
@@ -717,7 +717,7 @@ func (v *PHPVisitor) resolveFQCN(typeName string) string {
 		}
 	}
 
-	// 2. Fallback au namespace courant
+	// 2. Fallback to the current namespace
 	if v.namespace != "" {
 		return v.namespace + "\\" + typeName
 	}
