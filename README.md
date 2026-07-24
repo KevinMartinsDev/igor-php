@@ -42,6 +42,13 @@ During its static analysis of shared/singleton services, Igor recursively scans 
 | **PHP Superglobals** | `SuperglobalsUsage` | Direct access to legacy superglobals instead of injecting or using the framework's Request object. | 🟡 Warning | `$_GET['id']` or `$_POST['name']` |
 | **Process Termination** | `ExecutionTerminator` | Standard PHP termination statements that crash the persistent worker. | 🔴 Critical | `exit()` or `die()` |
 
+> 💡 **Philosophy & False Positives**:
+> Igor's primary mission is to shield you as much as possible from dangerous code patterns that can pollute state or leak memory in persistent worker environments.
+>
+> To achieve this, Igor is deliberately strict: **we chose to report as many potential issues as possible** to guide your eyes to where things might go wrong. Consequently, Igor may occasionally raise false positives. It remains your responsibility to analyze Igor's findings and decide if they can be safely ignored (e.g., using `// @igor-ignore` or the `#[WorkerSafe]` attribute).
+>
+> **Pro-Tip**: Enabling the **Symfony Bundle** dramatically reduces false positives. It grants Igor direct visibility into Symfony's compiled container, allowing it to bypass warnings for transient (non-shared) services and automatically ignore mutations on services marked as resettable (tagged with `kernel.reset`).
+
 ---
 
 ## 📋 Prerequisites
