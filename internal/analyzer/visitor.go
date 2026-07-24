@@ -531,59 +531,72 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		return
 	}
 
-	// --- Rule 1: DetectSingletonMutationRule ---
-	// If the method name starts with a mutation prefix (add, set, push, register, append)
-	if hasMutationPrefix(methodName) {
-		// If the current class implements ResetInterface, we treat this as a standard property mutation.
-		// It is allowed as long as the property itself is cleared/reset in the reset() method.
-		if v.isReset {
-			v.mutated[propName] = mutationInfo{
-				line:       int(n.StartPosition().Row) + 1,
-				code:       v.lines[n.StartPosition().Row],
-				snippet:    v.getContent(n),
-				astDetails: n.ToSexp(),
-			}
-		} else {
-			// Otherwise, check if the injected type implements ResetInterface in the Symfony container
-			isResettable := false
-			if typeName, ok := v.propertyTypes[propName]; ok {
-				fqcn := v.resolveFQCN(typeName)
-				if v.engine != nil && v.engine.IsResettable(fqcn) {
-					isResettable = true
-				}
-			}
+	// Run Rule 1: DetectSingletonMutationRule
+	v.detectSingletonMutation(n, propName, methodName)
 
-			if !isResettable {
-				msg := fmt.Sprintf("Mutation detected on an injected dependency ($this->%s). Risk of State Leak in a worker.", propName)
-				v.addFinding(n, msg, "Avoid modifying injected dependencies at runtime, or use a ResetInterface.", "ERROR")
-			}
+	// Run Rule 2: DetectClosureStateLeakRule
+	v.detectClosureStateLeak(n)
+}
+
+// detectSingletonMutation flags runtime mutations on injected dependencies unless they are resettable.
+func (v *PHPVisitor) detectSingletonMutation(n *sitter.Node, propName, methodName string) {
+	if !hasMutationPrefix(methodName) {
+		return
+	}
+
+	// If the current class implements ResetInterface, we treat this as a standard property mutation.
+	// It is allowed as long as the property itself is cleared/reset in the reset() method.
+	if v.isReset {
+		v.mutated[propName] = mutationInfo{
+			line:       int(n.StartPosition().Row) + 1,
+			code:       v.lines[n.StartPosition().Row],
+			snippet:    v.getContent(n),
+			astDetails: n.ToSexp(),
+		}
+		return
+	}
+
+	// Otherwise, check if the injected type implements ResetInterface in the Symfony container
+	isResettable := false
+	if typeName, ok := v.propertyTypes[propName]; ok {
+		fqcn := v.resolveFQCN(typeName)
+		if v.engine != nil && v.engine.IsResettable(fqcn) {
+			isResettable = true
 		}
 	}
 
-	// --- Rule 2: DetectClosureStateLeakRule ---
-	// Walk the method arguments to find potential anonymous functions capturing local variables
+	if !isResettable {
+		msg := fmt.Sprintf("Mutation detected on an injected dependency ($this->%s). Risk of State Leak in a worker.", propName)
+		v.addFinding(n, msg, "Avoid modifying injected dependencies at runtime, or use a ResetInterface.", "ERROR")
+	}
+}
+
+// detectClosureStateLeak flags anonymous functions capturing local scope via use() passed as arguments to singleton dependencies.
+func (v *PHPVisitor) detectClosureStateLeak(n *sitter.Node) {
 	argsNode := n.ChildByFieldName("arguments")
-	if argsNode != nil {
-		var findClosures func(*sitter.Node)
-		findClosures = func(node *sitter.Node) {
-			if node == nil {
-				return
-			}
-			// If the node is an anonymous function (closure)
-			if node.Kind() == "anonymous_function" {
-				// And it has a "use" capture clause (use ($var))
-				if hasUseClause(node) {
-					msg := "Potential Memory Leak: Injection of a closure capturing local state into a shared service."
-					v.addFinding(node, msg, "Avoid injecting closures that capture local state via use() into shared services.", "ERROR")
-				}
-			}
-			// Recursive walk of argument node children (e.g., in a nested array)
-			for i := uint(0); i < node.ChildCount(); i++ {
-				findClosures(node.Child(i))
+	if argsNode == nil {
+		return
+	}
+
+	var findClosures func(*sitter.Node)
+	findClosures = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+		// If the node is an anonymous function (closure)
+		if node.Kind() == "anonymous_function" {
+			// And it has a "use" capture clause (use ($var))
+			if hasUseClause(node) {
+				msg := "Potential Memory Leak: Injection of a closure capturing local state into a shared service."
+				v.addFinding(node, msg, "Avoid injecting closures that capture local state via use() into shared services.", "ERROR")
 			}
 		}
-		findClosures(argsNode)
+		// Recursive walk of argument node children (e.g., in a nested array)
+		for i := uint(0); i < node.ChildCount(); i++ {
+			findClosures(node.Child(i))
+		}
 	}
+	findClosures(argsNode)
 }
 
 // isPropertyFetchOnThis checks if a node is a property of the current class via $this (e.g., $this->propertyName)
