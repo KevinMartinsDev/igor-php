@@ -99,32 +99,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		}
 		v.isWorkerSafeMethod = v.hasAttribute(n, "WorkerSafe")
 		v.finallyCleaned = make(map[string]bool)
-
-		// Pre-scan the entire method body for finally cleanups
-		body := n.ChildByFieldName("body")
-		if body != nil {
-			var preScanFinally func(*sitter.Node)
-			preScanFinally = func(node *sitter.Node) {
-				if node == nil {
-					return
-				}
-				if node.Kind() == "try_statement" {
-					for i := uint(0); i < node.ChildCount(); i++ {
-						child := node.Child(i)
-						if child.Kind() == "finally_clause" {
-							cleanups := v.getFinallyCleanedProperties(child)
-							for prop := range cleanups {
-								v.finallyCleaned[prop] = true
-							}
-						}
-					}
-				}
-				for i := uint(0); i < node.ChildCount(); i++ {
-					preScanFinally(node.Child(i))
-				}
-			}
-			preScanFinally(body)
-		}
+		v.preScanFinallyCleanups(n)
 	case "assignment_expression", "augmented_assignment_expression":
 		v.handleMutation(n.ChildByFieldName("left"))
 	case "update_expression":
@@ -790,56 +765,13 @@ func (v *PHPVisitor) getFinallyCleanedProperties(finallyNode *sitter.Node) map[s
 			return
 		}
 
-		// 1. Detect function calls like array_pop($this->propertyName) or array_shift($this->propertyName)
-		if node.Kind() == "function_call_expression" {
-			fnNameNode := node.ChildByFieldName("function")
-			if fnNameNode == nil {
-				fnNameNode = node.ChildByFieldName("name")
-			}
-			if fnNameNode != nil {
-				fnName := strings.ToLower(v.getContent(fnNameNode))
-				if fnName == "array_pop" || fnName == "array_shift" {
-					argsNode := node.ChildByFieldName("arguments")
-					if argsNode != nil {
-						for i := uint(0); i < argsNode.ChildCount(); i++ {
-							arg := argsNode.Child(i)
-							if arg.Kind() == "argument" && arg.NamedChildCount() > 0 {
-								expr := arg.NamedChild(0)
-								if expr != nil && expr.Kind() == "member_access_expression" {
-									prop, isProp := v.isPropertyFetchOnThis(expr)
-									if isProp {
-										cleanups[prop] = true
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// 2. Detect assignment expressions like $this->propertyName = null or $this->propertyName = []
-		if node.Kind() == "assignment_expression" {
-			left := node.ChildByFieldName("left")
-			if left != nil && left.Kind() == "member_access_expression" {
-				prop, isProp := v.isPropertyFetchOnThis(left)
-				if isProp {
-					cleanups[prop] = true
-				}
-			}
-		}
-
-		// 3. Detect unset statements like unset($this->propertyName)
-		if node.Kind() == "unset_statement" {
-			for i := uint(0); i < node.ChildCount(); i++ {
-				child := node.Child(i)
-				if child.Kind() == "member_access_expression" {
-					prop, isProp := v.isPropertyFetchOnThis(child)
-					if isProp {
-						cleanups[prop] = true
-					}
-				}
-			}
+		switch node.Kind() {
+		case "function_call_expression":
+			v.checkFinallyFunctionCall(node, cleanups)
+		case "assignment_expression":
+			v.checkFinallyAssignment(node, cleanups)
+		case "unset_statement":
+			v.checkFinallyUnset(node, cleanups)
 		}
 
 		for i := uint(0); i < node.ChildCount(); i++ {
@@ -849,4 +781,88 @@ func (v *PHPVisitor) getFinallyCleanedProperties(finallyNode *sitter.Node) map[s
 
 	walkFinally(finallyNode)
 	return cleanups
+}
+
+// checkFinallyFunctionCall detects cleanup function calls like array_pop($this->propertyName) or array_shift($this->propertyName).
+func (v *PHPVisitor) checkFinallyFunctionCall(node *sitter.Node, cleanups map[string]bool) {
+	fnNameNode := node.ChildByFieldName("function")
+	if fnNameNode == nil {
+		fnNameNode = node.ChildByFieldName("name")
+	}
+	if fnNameNode == nil {
+		return
+	}
+	fnName := strings.ToLower(v.getContent(fnNameNode))
+	if fnName != "array_pop" && fnName != "array_shift" {
+		return
+	}
+	argsNode := node.ChildByFieldName("arguments")
+	if argsNode == nil {
+		return
+	}
+	for i := uint(0); i < argsNode.ChildCount(); i++ {
+		arg := argsNode.Child(i)
+		if arg.Kind() == "argument" && arg.NamedChildCount() > 0 {
+			expr := arg.NamedChild(0)
+			if expr != nil && expr.Kind() == "member_access_expression" {
+				prop, isProp := v.isPropertyFetchOnThis(expr)
+				if isProp {
+					cleanups[prop] = true
+				}
+			}
+		}
+	}
+}
+
+// checkFinallyAssignment detects cleanup assignments like $this->propertyName = null or $this->propertyName = [].
+func (v *PHPVisitor) checkFinallyAssignment(node *sitter.Node, cleanups map[string]bool) {
+	left := node.ChildByFieldName("left")
+	if left != nil && left.Kind() == "member_access_expression" {
+		prop, isProp := v.isPropertyFetchOnThis(left)
+		if isProp {
+			cleanups[prop] = true
+		}
+	}
+}
+
+// checkFinallyUnset detects cleanup unset statements like unset($this->propertyName).
+func (v *PHPVisitor) checkFinallyUnset(node *sitter.Node, cleanups map[string]bool) {
+	for i := uint(0); i < node.ChildCount(); i++ {
+		child := node.Child(i)
+		if child.Kind() == "member_access_expression" {
+			prop, isProp := v.isPropertyFetchOnThis(child)
+			if isProp {
+				cleanups[prop] = true
+			}
+		}
+	}
+}
+
+// preScanFinallyCleanups recursively scans a method or function body to extract properties cleaned up in finally blocks.
+func (v *PHPVisitor) preScanFinallyCleanups(n *sitter.Node) {
+	body := n.ChildByFieldName("body")
+	if body == nil {
+		return
+	}
+	var preScanFinally func(*sitter.Node)
+	preScanFinally = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+		if node.Kind() == "try_statement" {
+			for i := uint(0); i < node.ChildCount(); i++ {
+				child := node.Child(i)
+				if child.Kind() == "finally_clause" {
+					cleanups := v.getFinallyCleanedProperties(child)
+					for prop := range cleanups {
+						v.finallyCleaned[prop] = true
+					}
+				}
+			}
+		}
+		for i := uint(0); i < node.ChildCount(); i++ {
+			preScanFinally(node.Child(i))
+		}
+	}
+	preScanFinally(body)
 }
