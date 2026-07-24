@@ -151,6 +151,21 @@ func (a *Auditor) IsExplicitlyNonShared(className string) bool {
 	return false
 }
 
+func (a *Auditor) IsResettable(className string) bool {
+	if a.Symfony == nil || a.Symfony.Container == nil {
+		return false
+	}
+	className = strings.TrimPrefix(strings.ReplaceAll(className, "/", "\\"), "\\")
+	for _, def := range a.Symfony.Container.Definitions {
+		if strings.TrimPrefix(def.Class, "\\") == className {
+			if def.IsResettable() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // IsDevPackagePath returns true if the file path belongs to a dev package in vendor/.
 func (a *Auditor) IsDevPackagePath(path string) bool {
 	// Convert to slash for cross-platform comparison

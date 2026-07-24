@@ -13,6 +13,7 @@ type Engine interface {
 	RecordClassAudited(name string)
 	IsExplicitlyNonShared(className string) bool
 	IsSafeNamespace(className string) bool
+	IsResettable(className string) bool
 }
 
 type mutationInfo struct {
@@ -36,6 +37,7 @@ type PHPVisitor struct {
 	isWorkerSafeMethod bool
 	readonlyProps      map[string]bool
 	workerSafeProps    map[string]bool
+	propertyTypes      map[string]string
 	mutated            map[string]mutationInfo
 	resetted           map[string]bool
 	engine             Engine
@@ -52,6 +54,7 @@ func NewVisitor(content []byte, engine Engine) *PHPVisitor {
 		resetted:        make(map[string]bool),
 		readonlyProps:   make(map[string]bool),
 		workerSafeProps: make(map[string]bool),
+		propertyTypes:   make(map[string]string),
 		engine:          engine,
 	}
 }
@@ -103,6 +106,8 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		v.addFinding(n, "Usage of exit/die is forbidden in Worker mode.", "Use Symfony response or exceptions instead.", "ERROR")
 	case "function_call_expression":
 		v.handleFunctionCall(n)
+	case "member_call_expression":
+		v.handleMethodCall(n)
 	case "variable_name":
 		v.handleVariable(n)
 	case "static_variable_declaration":
@@ -160,9 +165,11 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 	v.resetted = make(map[string]bool)
 	v.readonlyProps = make(map[string]bool)
 	v.workerSafeProps = make(map[string]bool)
+	v.propertyTypes = make(map[string]string)
 	v.isWorkerSafeClass = v.hasAttribute(n, "WorkerSafe")
 
 	v.scanReadonlyProps(n)
+	v.scanPropertyTypes(n)
 }
 
 func (v *PHPVisitor) scanReadonlyProps(classNode *sitter.Node) {
@@ -485,4 +492,234 @@ func (v *PHPVisitor) hasAttribute(n *sitter.Node, target string) bool {
 		}
 	}
 	return false
+}
+
+// handleMethodCall intercepte et analyse les appels de méthodes (ex: $this->dispatcher->addListener() ou $this->googleTagManager->addPush()).
+func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
+	if n == nil {
+		return
+	}
+
+	fullName := v.curClass
+	if v.namespace != "" {
+		fullName = v.namespace + "\\" + v.curClass
+	}
+
+	// Si le service est explicitement transient (non partagé), les mutations sont acceptées
+	if v.nonSharedServices[strings.TrimPrefix(fullName, "\\")] {
+		return
+	}
+	if v.engine != nil && (v.engine.IsExplicitlyNonShared(fullName) || v.engine.IsSafeNamespace(fullName)) {
+		return
+	}
+
+	// 1. Récupération de l'objet récepteur de l'appel et du nom de la méthode
+	obj := n.ChildByFieldName("object")
+	if obj == nil {
+		return
+	}
+
+	nameNode := n.ChildByFieldName("name")
+	if nameNode == nil {
+		return
+	}
+	methodName := v.getContent(nameNode)
+
+	// 2. Vérification si l'objet est une propriété de la classe courante ($this->nomDePropriete)
+	propName, isProp := v.isPropertyFetchOnThis(obj)
+	if !isProp {
+		return
+	}
+
+	// --- Règle 1 : DetectSingletonMutationRule ---
+	// Si le nom de la méthode commence par un préfixe de mutation (add, set, push, register, append)
+	if hasMutationPrefix(methodName) {
+		// Vérifie si le type injecté implémente la ResetInterface dans le conteneur Symfony
+		isResettable := false
+		if typeName, ok := v.propertyTypes[propName]; ok {
+			fqcn := v.resolveFQCN(typeName)
+			if v.engine != nil && v.engine.IsResettable(fqcn) {
+				isResettable = true
+			}
+		}
+
+		if !isResettable {
+			msg := fmt.Sprintf("Mutation detected on an injected dependency ($this->%s). Risk of State Leak in a worker.", propName)
+			v.addFinding(n, msg, "Avoid modifying injected dependencies at runtime, or use a ResetInterface.", "ERROR")
+		}
+	}
+
+	// --- Règle 2 : DetectClosureStateLeakRule ---
+	// Parcourir les arguments de la méthode pour trouver d'éventuelles fonctions anonymes qui capturent des variables locales
+	argsNode := n.ChildByFieldName("arguments")
+	if argsNode != nil {
+		var findClosures func(*sitter.Node)
+		findClosures = func(node *sitter.Node) {
+			if node == nil {
+				return
+			}
+			// Si le nœud est une fonction anonyme (closure)
+			if node.Kind() == "anonymous_function" {
+				// Et qu'elle possède une clause de capture "use" (use ($var))
+				if hasUseClause(node) {
+					msg := "Potential Memory Leak: Injection of a closure capturing local state into a shared service."
+					v.addFinding(node, msg, "Avoid injecting closures that capture local state via use() into shared services.", "ERROR")
+				}
+			}
+			// Parcours récursif des enfants du nœud argument (ex: dans un tableau imbriqué)
+			for i := uint(0); i < node.ChildCount(); i++ {
+				findClosures(node.Child(i))
+			}
+		}
+		findClosures(argsNode)
+	}
+}
+
+// isPropertyFetchOnThis vérifie si un nœud correspond à une propriété de la classe courante via $this (ex: $this->propertyName)
+func (v *PHPVisitor) isPropertyFetchOnThis(n *sitter.Node) (string, bool) {
+	if n == nil {
+		return "", false
+	}
+	if n.Kind() != "member_access_expression" {
+		return "", false
+	}
+	obj := n.ChildByFieldName("object")
+	if obj == nil {
+		return "", false
+	}
+	objContent := v.getContent(obj)
+	// Vérifie si l'accès est fait sur l'objet $this
+	if !strings.Contains(objContent, "$this") {
+		return "", false
+	}
+	nameNode := n.ChildByFieldName("name")
+	if nameNode == nil {
+		return "", false
+	}
+	return v.getContent(nameNode), true
+}
+
+// hasMutationPrefix vérifie si le nom de la méthode commence par un préfixe de mutation standard
+func hasMutationPrefix(methodName string) bool {
+	prefixes := []string{"add", "set", "push", "register", "append"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(methodName, prefix) {
+			// On vérifie que le préfixe soit bien délimité (ex: camelCase/PascalCase) pour éviter des faux positifs comme "settle" ou "address"
+			if len(methodName) == len(prefix) {
+				return true
+			}
+			nextChar := methodName[len(prefix)]
+			if nextChar >= 'A' && nextChar <= 'Z' {
+				return true
+			}
+			if nextChar == '_' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasUseClause vérifie si une fonction anonyme possède une clause de capture "use (...)"
+func hasUseClause(node *sitter.Node) bool {
+	for i := uint(0); i < node.ChildCount(); i++ {
+		if node.Child(i).Kind() == "anonymous_function_use_clause" {
+			return true
+		}
+	}
+	return false
+}
+
+// scanPropertyTypes extrait récursivement les type-hints des propriétés de la classe et des paramètres promus du constructeur.
+func (v *PHPVisitor) scanPropertyTypes(classNode *sitter.Node) {
+	body := classNode.ChildByFieldName("body")
+	if body == nil {
+		return
+	}
+
+	for i := uint(0); i < body.ChildCount(); i++ {
+		member := body.Child(i)
+		if member.Kind() == "property_declaration" {
+			typeNode := member.ChildByFieldName("type")
+			var typeStr string
+			if typeNode != nil {
+				typeStr = v.getContent(typeNode)
+			}
+			for j := uint(0); j < member.ChildCount(); j++ {
+				child := member.Child(j)
+				if child.Kind() == "property_element" {
+					nameNode := child.ChildByFieldName("name")
+					if nameNode != nil {
+						propName := strings.TrimPrefix(v.getContent(nameNode), "$")
+						if typeStr != "" {
+							v.propertyTypes[propName] = typeStr
+						}
+					}
+				}
+			}
+		}
+		if member.Kind() == "method_declaration" {
+			nameNode := member.ChildByFieldName("name")
+			if nameNode != nil && strings.ToLower(v.getContent(nameNode)) == "__construct" {
+				params := member.ChildByFieldName("parameters")
+				if params != nil {
+					for j := uint(0); j < params.ChildCount(); j++ {
+						param := params.Child(j)
+						if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" {
+							typeNode := param.ChildByFieldName("type")
+							if typeNode != nil {
+								typeStr := v.getContent(typeNode)
+								for k := uint(0); k < param.ChildCount(); k++ {
+									child := param.Child(k)
+									if child.Kind() == "variable_name" {
+										propName := strings.TrimPrefix(v.getContent(child), "$")
+										v.propertyTypes[propName] = typeStr
+										break
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// resolveFQCN résout le nom de classe complet (Fully Qualified Class Name) d'un type-hint en scannant les "use" imports du fichier.
+func (v *PHPVisitor) resolveFQCN(typeName string) string {
+	if strings.HasPrefix(typeName, "\\") {
+		return strings.TrimPrefix(typeName, "\\")
+	}
+
+	// 1. Recherche parmi les imports "use" du fichier courant
+	for _, line := range v.lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "use ") && strings.HasSuffix(line, ";") {
+			importPart := strings.TrimSuffix(strings.TrimPrefix(line, "use "), ";")
+			importPart = strings.TrimSpace(importPart)
+			if strings.Contains(importPart, " as ") {
+				parts := strings.Split(importPart, " as ")
+				if len(parts) == 2 {
+					fqcn := strings.TrimSpace(parts[0])
+					alias := strings.TrimSpace(parts[1])
+					if alias == typeName {
+						return fqcn
+					}
+				}
+			} else {
+				parts := strings.Split(importPart, "\\")
+				lastPart := parts[len(parts)-1]
+				if lastPart == typeName {
+					return importPart
+				}
+			}
+		}
+	}
+
+	// 2. Fallback au namespace courant
+	if v.namespace != "" {
+		return v.namespace + "\\" + typeName
+	}
+	return typeName
 }

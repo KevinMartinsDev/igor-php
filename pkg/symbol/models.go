@@ -31,10 +31,39 @@ type SymfonyContainer struct {
 
 // SymfonyService represents a single service definition in Symfony.
 type SymfonyService struct {
-	Class     string `json:"class"`
-	Public    bool   `json:"public"`
-	Shared    bool   `json:"shared"`
-	Arguments []any  `json:"arguments"`
+	Class      string `json:"class"`
+	Public     bool   `json:"public"`
+	Shared     bool   `json:"shared"`
+	Arguments  []any  `json:"arguments"`
+	Resettable bool   `json:"resettable"`
+	Tags       any    `json:"tags"`
+}
+
+// IsResettable checks if this service is resettable in any supported format.
+func (s *SymfonyService) IsResettable() bool {
+	if s.Resettable {
+		return true
+	}
+	if s.Tags == nil {
+		return false
+	}
+	// Try parsing as array/slice of maps (standard format)
+	if slice, ok := s.Tags.([]any); ok {
+		for _, item := range slice {
+			if m, ok := item.(map[string]any); ok {
+				if name, ok := m["name"].(string); ok && name == "kernel.reset" {
+					return true
+				}
+			}
+		}
+	}
+	// Try parsing as map (alternative format)
+	if m, ok := s.Tags.(map[string]any); ok {
+		if _, exists := m["kernel.reset"]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 // AuditStatus represents the audit state of a single service.

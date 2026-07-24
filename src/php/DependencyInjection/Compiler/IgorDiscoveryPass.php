@@ -21,10 +21,23 @@ class IgorDiscoveryPass implements CompilerPassInterface
                 continue;
             }
 
+            $class = $container->getParameterBag()->resolveValue($definition->getClass());
+            $isResettable = $definition->hasTag('kernel.reset');
+            if (!$isResettable && $class) {
+                try {
+                    if (class_exists($class)) {
+                        $isResettable = is_subclass_of($class, 'Symfony\Contracts\Service\ResetInterface');
+                    }
+                } catch (\Throwable $e) {
+                    $isResettable = false;
+                }
+            }
+
             $serviceMap['definitions'][$id] = [
-                'class' => $container->getParameterBag()->resolveValue($definition->getClass()),
+                'class' => $class,
                 'public' => $definition->isPublic(),
                 'shared' => $definition->isShared(),
+                'resettable' => $isResettable,
                 'arguments' => $this->extractDependencies($definition),
             ];
         }
