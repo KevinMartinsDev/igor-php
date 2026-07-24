@@ -21,7 +21,24 @@ Like the legendary assistant, `igor` checks every connection and part of your ap
 - **🔇 Zero Noise**: Automatically ignores `Symfony\` and `Doctrine\` namespaces, and common data folders (`Entity`, `Dto`, `ApiResource`).
 - **📦 Project vs. Vendor**: Clear separation between your code and third-party dependencies, with tailored recommendations for each.
 - **🎯 Selective Ignore**: Skip specific lines using the `// @igor-ignore` comment, or target entire classes, methods, and properties using modern **PHP 8 Attributes** (`#[WorkerSafe]`).
-- **🌉 Framework-Agnostic Bridge**: Not on Symfony? Feed Igor your container's service graph via `--container-dump <file.json>` so it skips transient (non-shared) value objects and per-request helpers — the same precision the Symfony bridge gives, for **any** framework (Laravel, Laminas, …).
+- Bridge-Agnostic Bridge**: Not on Symfony? Feed Igor your container's service graph via `--container-dump <file.json>` so it skips transient (non-shared) value objects and per-request helpers — the same precision the Symfony bridge gives, for **any** framework (Laravel, Laminas, …).
+
+---
+
+## 🔍 What Igor Tracks
+
+During its static analysis of shared/singleton services, Igor recursively scans the AST to detect and flag several dangerous patterns that can lead to memory leaks or state pollution across requests:
+
+| Category | Pattern / Rule | Description | Impact Level | Code Example |
+| :--- | :--- | :--- | :---: | :--- |
+| **Dependency Mutation** | `DetectSingletonMutation` | Calling mutation methods (starting with `set`, `add`, `push`, `register`, `append`) on injected properties. | 🔴 Critical | `$this->googleTagManager->addPush($data);` |
+| **Closure State Leak** | `DetectClosureStateLeak` | Passing anonymous functions that capture local variables (`use ($var)`) to shared service dependencies. | 🔴 Critical | `$this->dispatcher->addListener('response', function () use ($optin) {});` |
+| **State Mutation** | `StateMutation` | Direct assignment or mutation of class properties or static variables at runtime. | 🔴 Critical | `$this->count++;`<br>`self::$cache[] = $val;` |
+| **Reset Interface** | `IncompleteReset` | Class implements `ResetInterface` but some of its mutated properties are not cleared inside `reset()`. | 🟡 Warning | `public function reset() {`<br>`  // forgot to clear $count`<br>`}` |
+| **Process State Mutation** | `ProcessStateMutation` | Functions modifying global PHP configuration or runtime behavior that persist across requests. | 🟡 Warning | `date_default_timezone_set('UTC');`<br>`ini_set('memory_limit', '256M');` |
+| **Local Static Variable** | `LocalStaticVariable` | Declaring local static variables inside methods, which persist across the PHP process lifecycle. | 🔴 Critical | `static $counter = 0;` |
+| **PHP Superglobals** | `SuperglobalsUsage` | Direct access to legacy superglobals instead of injecting or using the framework's Request object. | 🟡 Warning | `$_GET['id']` or `$_POST['name']` |
+| **Process Termination** | `ExecutionTerminator` | Standard PHP termination statements that crash the persistent worker. | 🔴 Critical | `exit()` or `die()` |
 
 ---
 
