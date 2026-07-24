@@ -5,6 +5,8 @@
 
 **The faithful assistant for your FrankenPHP Workers.**
 
+⭐️ **If you find Igor useful, please consider leaving a star! It encourages us to keep maintaining and improving the project.**
+
 `igor-php` is an ultra-fast static linter written in **Go** that prepares your **Symfony** application for the persistent memory model of **FrankenPHP**.
 
 Like the legendary assistant, `igor` checks every connection and part of your application to ensure it won't "blow up" when the lightning strikes (Worker Mode).
