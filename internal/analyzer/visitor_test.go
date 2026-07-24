@@ -287,4 +287,50 @@ class MyService implements Symfony\Contracts\Service\ResetInterface {
 	}
 }
 
+func TestPHPVisitor_TryFinallyCleanup(t *testing.T) {
+	code := `<?php
+class AuthorizationChecker {
+    private array $tokenStack = [];
+    private array $accessDecisionStack = [];
+
+    public function isGranted($attribute, $subject = null): bool
+    {
+        $this->accessDecisionStack[] = 'decision';
+
+        try {
+            return true;
+        } finally {
+            array_pop($this->accessDecisionStack);
+        }
+    }
+
+    public function isGrantedForUser($user, $attribute): bool
+    {
+        $this->tokenStack[] = 'token';
+
+        try {
+            return $this->isGranted($attribute);
+        } finally {
+            array_pop($this->tokenStack);
+        }
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	if len(findings) != 0 {
+		t.Errorf("Expected 0 findings because the state mutations are perfectly cleaned up in finally blocks, got: %v", findings)
+	}
+}
+
 
