@@ -38,6 +38,7 @@ type PHPVisitor struct {
 	readonlyProps      map[string]bool
 	workerSafeProps    map[string]bool
 	propertyTypes      map[string]string
+	finallyCleaned     map[string]bool
 	mutated            map[string]mutationInfo
 	resetted           map[string]bool
 	engine             Engine
@@ -55,6 +56,7 @@ func NewVisitor(content []byte, engine Engine) *PHPVisitor {
 		readonlyProps:   make(map[string]bool),
 		workerSafeProps: make(map[string]bool),
 		propertyTypes:   make(map[string]string),
+		finallyCleaned:  make(map[string]bool),
 		engine:          engine,
 	}
 }
@@ -84,7 +86,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 	}
 	nodeType := n.Kind()
 
-	oldClass, oldMethod, oldIsRes, oldIsReadonly, oldReadonlyProps, oldIsWorkerSafeClass, oldIsWorkerSafeMethod := v.curClass, v.curMethod, v.isReset, v.isReadonlyClass, v.readonlyProps, v.isWorkerSafeClass, v.isWorkerSafeMethod
+	oldClass, oldMethod, oldIsRes, oldIsReadonly, oldReadonlyProps, oldIsWorkerSafeClass, oldIsWorkerSafeMethod, oldFinallyCleaned := v.curClass, v.curMethod, v.isReset, v.isReadonlyClass, v.readonlyProps, v.isWorkerSafeClass, v.isWorkerSafeMethod, v.finallyCleaned
 
 	switch nodeType {
 	case "namespace_definition":
@@ -96,6 +98,33 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 			v.curMethod = v.getContent(nameNode)
 		}
 		v.isWorkerSafeMethod = v.hasAttribute(n, "WorkerSafe")
+		v.finallyCleaned = make(map[string]bool)
+
+		// Pre-scan the entire method body for finally cleanups
+		body := n.ChildByFieldName("body")
+		if body != nil {
+			var preScanFinally func(*sitter.Node)
+			preScanFinally = func(node *sitter.Node) {
+				if node == nil {
+					return
+				}
+				if node.Kind() == "try_statement" {
+					for i := uint(0); i < node.ChildCount(); i++ {
+						child := node.Child(i)
+						if child.Kind() == "finally_clause" {
+							cleanups := v.getFinallyCleanedProperties(child)
+							for prop := range cleanups {
+								v.finallyCleaned[prop] = true
+							}
+						}
+					}
+				}
+				for i := uint(0); i < node.ChildCount(); i++ {
+					preScanFinally(node.Child(i))
+				}
+			}
+			preScanFinally(body)
+		}
 	case "assignment_expression", "augmented_assignment_expression":
 		v.handleMutation(n.ChildByFieldName("left"))
 	case "update_expression":
@@ -125,7 +154,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		}
 		v.curClass, v.isReset, v.isReadonlyClass, v.readonlyProps, v.isWorkerSafeClass = oldClass, oldIsRes, oldIsReadonly, oldReadonlyProps, oldIsWorkerSafeClass
 	case "method_declaration", "function_definition":
-		v.curMethod, v.isWorkerSafeMethod = oldMethod, oldIsWorkerSafeMethod
+		v.curMethod, v.isWorkerSafeMethod, v.finallyCleaned = oldMethod, oldIsWorkerSafeMethod, oldFinallyCleaned
 	}
 }
 
@@ -383,8 +412,8 @@ func (v *PHPVisitor) logMutation(n *sitter.Node, prop string, static bool) {
 		key = "static::" + prop
 	}
 
-	// Skip if property is readonly or WorkerSafe
-	if !static && (v.readonlyProps[prop] || v.workerSafeProps[prop]) {
+	// Skip if property is readonly, WorkerSafe, or cleaned up in a finally block
+	if !static && (v.readonlyProps[prop] || v.workerSafeProps[prop] || v.finallyCleaned[prop]) {
 		return
 	}
 	if static && v.workerSafeProps[prop] {
@@ -746,4 +775,78 @@ func (v *PHPVisitor) resolveFQCN(typeName string) string {
 		return v.namespace + "\\" + typeName
 	}
 	return typeName
+}
+
+// getFinallyCleanedProperties scans a finally_clause AST node to extract properties of $this that are cleaned up.
+func (v *PHPVisitor) getFinallyCleanedProperties(finallyNode *sitter.Node) map[string]bool {
+	cleanups := make(map[string]bool)
+	if finallyNode == nil {
+		return cleanups
+	}
+
+	var walkFinally func(*sitter.Node)
+	walkFinally = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+
+		// 1. Detect function calls like array_pop($this->propertyName) or array_shift($this->propertyName)
+		if node.Kind() == "function_call_expression" {
+			fnNameNode := node.ChildByFieldName("function")
+			if fnNameNode == nil {
+				fnNameNode = node.ChildByFieldName("name")
+			}
+			if fnNameNode != nil {
+				fnName := strings.ToLower(v.getContent(fnNameNode))
+				if fnName == "array_pop" || fnName == "array_shift" {
+					argsNode := node.ChildByFieldName("arguments")
+					if argsNode != nil {
+						for i := uint(0); i < argsNode.ChildCount(); i++ {
+							arg := argsNode.Child(i)
+							if arg.Kind() == "argument" && arg.NamedChildCount() > 0 {
+								expr := arg.NamedChild(0)
+								if expr != nil && expr.Kind() == "member_access_expression" {
+									prop, isProp := v.isPropertyFetchOnThis(expr)
+									if isProp {
+										cleanups[prop] = true
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Detect assignment expressions like $this->propertyName = null or $this->propertyName = []
+		if node.Kind() == "assignment_expression" {
+			left := node.ChildByFieldName("left")
+			if left != nil && left.Kind() == "member_access_expression" {
+				prop, isProp := v.isPropertyFetchOnThis(left)
+				if isProp {
+					cleanups[prop] = true
+				}
+			}
+		}
+
+		// 3. Detect unset statements like unset($this->propertyName)
+		if node.Kind() == "unset_statement" {
+			for i := uint(0); i < node.ChildCount(); i++ {
+				child := node.Child(i)
+				if child.Kind() == "member_access_expression" {
+					prop, isProp := v.isPropertyFetchOnThis(child)
+					if isProp {
+						cleanups[prop] = true
+					}
+				}
+			}
+		}
+
+		for i := uint(0); i < node.ChildCount(); i++ {
+			walkFinally(node.Child(i))
+		}
+	}
+
+	walkFinally(finallyNode)
+	return cleanups
 }
