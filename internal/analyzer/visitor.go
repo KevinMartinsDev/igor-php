@@ -534,18 +534,29 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 	// --- Rule 1: DetectSingletonMutationRule ---
 	// If the method name starts with a mutation prefix (add, set, push, register, append)
 	if hasMutationPrefix(methodName) {
-		// Check if the injected type implements ResetInterface in the Symfony container
-		isResettable := false
-		if typeName, ok := v.propertyTypes[propName]; ok {
-			fqcn := v.resolveFQCN(typeName)
-			if v.engine != nil && v.engine.IsResettable(fqcn) {
-				isResettable = true
+		// If the current class implements ResetInterface, we treat this as a standard property mutation.
+		// It is allowed as long as the property itself is cleared/reset in the reset() method.
+		if v.isReset {
+			v.mutated[propName] = mutationInfo{
+				line:       int(n.StartPosition().Row) + 1,
+				code:       v.lines[n.StartPosition().Row],
+				snippet:    v.getContent(n),
+				astDetails: n.ToSexp(),
 			}
-		}
+		} else {
+			// Otherwise, check if the injected type implements ResetInterface in the Symfony container
+			isResettable := false
+			if typeName, ok := v.propertyTypes[propName]; ok {
+				fqcn := v.resolveFQCN(typeName)
+				if v.engine != nil && v.engine.IsResettable(fqcn) {
+					isResettable = true
+				}
+			}
 
-		if !isResettable {
-			msg := fmt.Sprintf("Mutation detected on an injected dependency ($this->%s). Risk of State Leak in a worker.", propName)
-			v.addFinding(n, msg, "Avoid modifying injected dependencies at runtime, or use a ResetInterface.", "ERROR")
+			if !isResettable {
+				msg := fmt.Sprintf("Mutation detected on an injected dependency ($this->%s). Risk of State Leak in a worker.", propName)
+				v.addFinding(n, msg, "Avoid modifying injected dependencies at runtime, or use a ResetInterface.", "ERROR")
+			}
 		}
 	}
 

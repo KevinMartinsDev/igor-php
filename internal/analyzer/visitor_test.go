@@ -216,3 +216,75 @@ class MyListener {
 	}
 }
 
+func TestPHPVisitor_DetectSingletonMutationRule_BypassedIfClassImplementsResetAndResetsProp(t *testing.T) {
+	code := `<?php
+class MyService implements Symfony\Contracts\Service\ResetInterface {
+    private $orExpression;
+    
+    public function set($v) {
+        $this->orExpression->add($v);
+    }
+    
+    public function reset() {
+        $this->orExpression = null;
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	if len(findings) != 0 {
+		t.Errorf("Expected 0 findings because the class implements ResetInterface and resets the property, got: %v", findings)
+	}
+}
+
+func TestPHPVisitor_DetectSingletonMutationRule_WarnsIfClassImplementsResetButForgetsToResetProp(t *testing.T) {
+	code := `<?php
+class MyService implements Symfony\Contracts\Service\ResetInterface {
+    private $orExpression;
+    
+    public function set($v) {
+        $this->orExpression->add($v);
+    }
+    
+    public function reset() {
+        // forgot to reset orExpression
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	found := false
+	expectedMsg := "Property 'orExpression' of MyService is mutated but not reset in reset()."
+	for _, f := range findings {
+		if f.Severity == "WARNING" && f.Message == expectedMsg {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected a WARNING finding with message %q, got: %v", expectedMsg, findings)
+	}
+}
+
+
