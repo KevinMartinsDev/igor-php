@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/igor-php/igor-php/internal/config"
+	"github.com/igor-php/igor-php/pkg/symbol"
 )
 
 func TestAuditFixtures(t *testing.T) {
@@ -113,4 +114,80 @@ func TestAuditFixtures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
+	// Create Auditor
+	cfg := config.Config{}
+	a := NewAuditor(cfg)
+
+	// Mock SymfonyBridge and Container
+	container := &symbol.SymfonyContainer{
+		Definitions: map[string]symbol.SymfonyService{
+			".abstract.instanceof.App\\Translator\\MyTranslator": {
+				Class:      "App\\Translator\\MyTranslator",
+				Public:     false,
+				Shared:     true,
+				Resettable: true,
+			},
+			"App\\Service\\NonSharedService": {
+				Class:      "App\\Service\\NonSharedService",
+				Public:     true,
+				Shared:     false,
+				Resettable: false,
+			},
+		},
+		Aliases: map[string]interface{}{
+			"App\\Translator\\TranslatorInterface": ".abstract.instanceof.App\\Translator\\MyTranslator",
+			"App\\Service\\NonSharedInterface":     "App\\Service\\NonSharedService",
+		},
+	}
+
+	a.Symfony = &SymfonyBridge{
+		Container: container,
+	}
+
+	// Test IsResettable
+	t.Run("IsResettable with exact class matching", func(t *testing.T) {
+		if !a.IsResettable("App\\Translator\\MyTranslator") {
+			t.Error("Expected MyTranslator class to be resettable")
+		}
+	})
+
+	t.Run("IsResettable with slashes normalized", func(t *testing.T) {
+		if !a.IsResettable("App/Translator/MyTranslator") {
+			t.Error("Expected slash-normalized class to be resettable")
+		}
+	})
+
+	t.Run("IsResettable with alias resolution", func(t *testing.T) {
+		if !a.IsResettable("App\\Translator\\TranslatorInterface") {
+			t.Error("Expected TranslatorInterface alias to resolve to resettable concrete service")
+		}
+	})
+
+	t.Run("IsResettable with unknown class", func(t *testing.T) {
+		if a.IsResettable("App\\UnknownService") {
+			t.Error("Expected unknown class to not be resettable")
+		}
+	})
+
+	// Test IsExplicitlyNonShared
+	t.Run("IsExplicitlyNonShared with exact class matching", func(t *testing.T) {
+		if !a.IsExplicitlyNonShared("App\\Service\\NonSharedService") {
+			t.Error("Expected NonSharedService to be non-shared")
+		}
+	})
+
+	t.Run("IsExplicitlyNonShared with alias resolution", func(t *testing.T) {
+		if !a.IsExplicitlyNonShared("App\\Service\\NonSharedInterface") {
+			t.Error("Expected NonSharedInterface alias to resolve to non-shared concrete service")
+		}
+	})
+
+	t.Run("IsExplicitlyNonShared on shared service", func(t *testing.T) {
+		if a.IsExplicitlyNonShared("App\\Translator\\MyTranslator") {
+			t.Error("Expected shared MyTranslator to not be explicitly non-shared")
+		}
+	})
 }

@@ -138,14 +138,76 @@ func (a *Auditor) IsDataPath(path string) bool {
 	return false
 }
 
+func normalizeClassName(s string) string {
+	s = strings.ReplaceAll(s, "/", "\\")
+	s = strings.TrimSpace(s)
+	return strings.TrimPrefix(s, "\\")
+}
+
+func resolveAliasTarget(val interface{}) string {
+	if s, ok := val.(string); ok {
+		return s
+	}
+	if m, ok := val.(map[string]interface{}); ok {
+		for _, key := range []string{"service", "id", "target"} {
+			if target, ok := m[key].(string); ok {
+				return target
+			}
+		}
+	}
+	return ""
+}
+
+func (a *Auditor) resolveAliases(className string) []string {
+	if a.Symfony == nil || a.Symfony.Container == nil {
+		return []string{normalizeClassName(className)}
+	}
+
+	normClassName := normalizeClassName(className)
+	possibleIDs := []string{normClassName}
+	visited := map[string]bool{normClassName: true}
+	current := normClassName
+
+	for {
+		var foundTarget string
+		for aliasKey, val := range a.Symfony.Container.Aliases {
+			if normalizeClassName(aliasKey) == current {
+				target := resolveAliasTarget(val)
+				if target != "" {
+					foundTarget = normalizeClassName(target)
+					break
+				}
+			}
+		}
+
+		if foundTarget != "" {
+			current = foundTarget
+			if !visited[current] {
+				visited[current] = true
+				possibleIDs = append(possibleIDs, current)
+				continue
+			}
+		}
+		break
+	}
+
+	return possibleIDs
+}
+
 func (a *Auditor) IsExplicitlyNonShared(className string) bool {
 	if a.Symfony == nil || a.Symfony.Container == nil {
 		return false
 	}
-	className = strings.TrimPrefix(strings.ReplaceAll(className, "/", "\\"), "\\")
-	for _, def := range a.Symfony.Container.Definitions {
-		if strings.TrimPrefix(def.Class, "\\") == className {
-			return !def.Shared
+	possibleIDs := a.resolveAliases(className)
+
+	for defID, def := range a.Symfony.Container.Definitions {
+		normDefID := normalizeClassName(defID)
+		normDefClass := normalizeClassName(def.Class)
+
+		for _, id := range possibleIDs {
+			if normDefID == id || normDefClass == id {
+				return !def.Shared
+			}
 		}
 	}
 	return false
@@ -155,11 +217,17 @@ func (a *Auditor) IsResettable(className string) bool {
 	if a.Symfony == nil || a.Symfony.Container == nil {
 		return false
 	}
-	className = strings.TrimPrefix(strings.ReplaceAll(className, "/", "\\"), "\\")
-	for _, def := range a.Symfony.Container.Definitions {
-		if strings.TrimPrefix(def.Class, "\\") == className {
-			if def.IsResettable() {
-				return true
+	possibleIDs := a.resolveAliases(className)
+
+	for defID, def := range a.Symfony.Container.Definitions {
+		normDefID := normalizeClassName(defID)
+		normDefClass := normalizeClassName(def.Class)
+
+		for _, id := range possibleIDs {
+			if normDefID == id || normDefClass == id {
+				if def.IsResettable() {
+					return true
+				}
 			}
 		}
 	}
