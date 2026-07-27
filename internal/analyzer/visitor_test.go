@@ -333,4 +333,47 @@ class AuthorizationChecker {
 	}
 }
 
+func TestPHPVisitor_ClassIsResettableFromSymfony_BypassesDirectMutationAndEnforcesResetCheck(t *testing.T) {
+	// ResettableService is defined in mockEngine as IsResettable = true
+	code := `<?php
+namespace App\Service;
+
+class ResettableService {
+    private $cache;
+    
+    public function mutate($v) {
+        $this->cache = $v;
+    }
+    
+    public function reset() {
+        // forgot to reset $cache
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	found := false
+	expectedMsg := "Property 'cache' of ResettableService is mutated but not reset in reset()."
+	for _, f := range findings {
+		if f.Severity == "WARNING" && f.Message == expectedMsg {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected an IncompleteReset WARNING finding for missing reset because the class is marked resettable by Symfony, got: %v", findings)
+	}
+}
+
 
