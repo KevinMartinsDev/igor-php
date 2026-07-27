@@ -34,6 +34,7 @@ During its static analysis of shared/singleton services, Igor recursively scans 
 | Category | Pattern / Rule | Description | Impact Level | Code Example |
 | :--- | :--- | :--- | :---: | :--- |
 | **Dependency Mutation** | `DetectSingletonMutation` | Calling mutation methods (starting with `set`, `add`, `push`, `register`, `append`) on injected properties. | 🔴 Critical | `$this->googleTagManager->addPush($data);` |
+| **Resettable Bypass** | *(Bypass)* | Igor automatically resolves Symfony autowire aliases and abstract interface/implementation chains to see if the dependency is marked as resettable, and **ignores mutation warnings** on it. | 🟢 Safe (Auto) | `$this->translator->setLanguage($lang);`<br>*(if translator is resettable)* |
 | **Closure State Leak** | `DetectClosureStateLeak` | Passing anonymous functions that capture local variables (`use ($var)`) to shared service dependencies. | 🔴 Critical | `$this->dispatcher->addListener('response', function () use ($optin) {});` |
 | **Finally Cleanup** | *(Bypass)* | Igor natively detects when a mutated state is guaranteed to be cleaned up inside a `finally` block (using `array_pop`, `unset`, or direct assignments), and **automatically bypasses the error**. | 🟢 Safe (Auto) | `try { $this->stack[] = $item; } finally { array_pop($this->stack); }` |
 | **State Mutation** | `StateMutation` | Direct assignment or mutation of class properties or static variables at runtime. | 🔴 Critical | `$this->count++;`<br>`self::$cache[] = $val;` |
@@ -49,6 +50,8 @@ During its static analysis of shared/singleton services, Igor recursively scans 
 > To achieve this, Igor is deliberately strict: **we chose to report as many potential issues as possible** to guide your eyes to where things might go wrong. Consequently, Igor may occasionally raise false positives. It remains your responsibility to analyze Igor's findings and decide if they can be safely ignored (e.g., using `// @igor-ignore` or the `#[WorkerSafe]` attribute).
 >
 > **Pro-Tip**: Enabling the **Symfony Bundle** dramatically reduces false positives. It grants Igor direct visibility into Symfony's compiled container, allowing it to bypass warnings for transient (non-shared) services and automatically ignore mutations on services marked as resettable (tagged with `kernel.reset`).
+>
+> **Smart Alias & Interface Resolution**: Igor is smart enough to traverse Symfony **aliases** and **interface-to-implementation autowire chains**. If your class property is type-hinted with an interface (e.g. `TranslatorInterface`), Igor will automatically resolve the alias chain in the container to find the concrete service definition (even if it uses decorated IDs like `.abstract.instanceof...`) to check if it's resettable, preventing false positive warnings.
 
 > 🧠 **Smart Stack Cleanup (Finally Blocks)**:
 > If your service manages temporary state using a stack or push/pop pattern (like Symfony's `AuthorizationChecker`), Igor is smart enough to scan `finally` clauses. If it detects that a mutated property is guaranteed to be restored or cleaned up inside the `finally` block (using `array_pop()`, `array_shift()`, `unset()`, or direct resets), the mutation is marked as safe and the warning is automatically bypassed.
