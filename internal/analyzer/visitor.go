@@ -163,6 +163,11 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 	classHeader := classText[:headerEnd]
 
 	v.isReset = strings.Contains(classHeader, "resetinterface") || strings.Contains(classHeader, "resettableinterface")
+	if !v.isReset && v.engine != nil {
+		if v.engine.IsResettable(fullName) {
+			v.isReset = true
+		}
+	}
 	v.isReadonlyClass = strings.Contains(classHeader, "readonly")
 
 	v.mutated = make(map[string]mutationInfo)
