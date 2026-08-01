@@ -418,13 +418,20 @@ func (v *PHPVisitor) isTransientOrEphemeral(leftLower, rightLower, rightContent 
 	}
 
 	// Heuristic 2: Ephemeral database QueryBuilders and Expressions are query-scoped, never shared across requests
-	return strings.Contains(rightLower, "querybuilder") ||
-		strings.Contains(rightLower, "createquerybuilder") ||
+	if strings.Contains(rightLower, "querybuilder") ||
 		strings.Contains(rightLower, "->expr(") ||
 		strings.Contains(rightLower, "->orx(") ||
 		strings.Contains(rightLower, "->andx(") ||
 		strings.Contains(leftLower, "querybuilder") ||
-		strings.Contains(leftLower, "expr")
+		strings.Contains(leftLower, "expr") {
+		return true
+	}
+
+	// Heuristic 3: Known factory, builder and safe transient infrastructure methods
+	return strings.Contains(rightLower, "->find") ||
+		strings.Contains(rightLower, "->create") ||
+		strings.Contains(rightLower, "->build") ||
+		strings.Contains(rightLower, "->getitem")
 }
 
 func (v *PHPVisitor) isRightSideShared(rightContent string) bool {
@@ -719,6 +726,13 @@ func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 		kind := curr.Kind()
 		switch kind {
 		case "member_call_expression", "nullsafe_member_call_expression":
+			nameNode := curr.ChildByFieldName("name")
+			if nameNode != nil {
+				methodName := v.getContent(nameNode)
+				if isTaintBreakerMethod(methodName) {
+					return "", false
+				}
+			}
 			curr = curr.ChildByFieldName("object")
 		case "member_access_expression", "nullsafe_member_access_expression":
 			obj := curr.ChildByFieldName("object")
@@ -762,6 +776,17 @@ func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// isTaintBreakerMethod checks if the method is a factory, builder, or query-scoped method that breaks the taint chain
+func isTaintBreakerMethod(methodName string) bool {
+	m := strings.ToLower(methodName)
+	return strings.HasPrefix(m, "find") ||
+		strings.HasPrefix(m, "create") ||
+		strings.HasPrefix(m, "build") ||
+		m == "getitem" ||
+		m == "getitems" ||
+		m == "expr"
 }
 
 // hasMutationPrefix checks if the method name starts with a standard mutation prefix
