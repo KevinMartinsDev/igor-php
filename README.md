@@ -56,6 +56,9 @@ During its static analysis of shared/singleton services, Igor recursively scans 
 > 🧠 **Smart Stack Cleanup (Finally Blocks)**:
 > If your service manages temporary state using a stack or push/pop pattern (like Symfony's `AuthorizationChecker`), Igor is smart enough to scan `finally` clauses. If it detects that a mutated property is guaranteed to be restored or cleaned up inside the `finally` block (using `array_pop()`, `array_shift()`, `unset()`, or direct resets), the mutation is marked as safe and the warning is automatically bypassed.
 
+> 🧠 **Infrastructure Taint Breakers**:
+> Igor's taint-tracking is incredibly powerful, but mutating query-scoped objects or transient builders (like Doctrine Queries, QueryBuilders, Symfony's `ConstraintViolationBuilder` from `$this->context->buildViolation(...)`, or PSR-6 cache items via `$this->cache->getItem(...)`) is completely safe. Igor has built-in **Taint Breakers** for these standard design patterns: any chained calls or assignments coming from methods starting with `find`, `create`, `build`, or calling `getItem`/`getItems` are recognized as transient/ephemeral. This automatically halts taint propagation and eliminates noise on your repositories, cache services, and validator classes.
+
 ---
 
 ## 📋 Prerequisites
