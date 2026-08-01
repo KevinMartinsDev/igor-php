@@ -547,6 +547,90 @@ class MyService {
 	}
 }
 
+func TestPHPVisitor_DetectSingletonMutation_DoctrineQueryBypass(t *testing.T) {
+	code := `<?php
+class CustomerParameterRepository {
+    public function findCustomersConfigValues($configurationKey, $shortname) {
+        $entityManager = $this->getEntityManager();
+        $query = $entityManager->createQuery("SELECT c FROM App\\Entity\\Customer c");
+        $query->setParameter('customerShortName', $shortname);
+        $query->setParameter('configName', $configurationKey);
+        
+        $nativeQuery = $entityManager->createNativeQuery("SELECT * FROM customer", $rsm);
+        $nativeQuery->setParameter('customerShortName', $shortname);
+        
+        $namedQuery = $entityManager->createNamedQuery("findActive");
+        $namedQuery->setParameter('status', 1);
+
+        return $query->getResult();
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	// Should be 0 findings because $query is created using a factory method and is not a local shared reference.
+	if len(findings) != 0 {
+		t.Errorf("Expected 0 findings because Doctrine Query is transient, got: %v", findings)
+	}
+}
+
+func TestPHPVisitor_DetectSingletonMutation_InfrastructureTaintBreakers(t *testing.T) {
+	code := `<?php
+class ValidationAndCacheService {
+	private $context;
+	private $cache;
+	private $repository;
+
+	public function testValidator() {
+		// Chained buildViolation with addViolation
+		$this->context->buildViolation("Error message")
+			->setParameter("{{ value }}", "test")
+			->addViolation();
+	}
+
+	public function testCache() {
+		// Cache items
+		$item = $this->cache->getItem("some_key");
+		$item->set("cached_value");
+	}
+
+	public function testRepositoryAndEntity() {
+		// Repository find and entity mutation
+		$entity = $this->repository->findOneBy(["id" => 123]);
+		$entity->setValue("new_value");
+	}
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	// Should be 0 findings because the chains are broken by buildViolation, getItem, and findOneBy.
+	if len(findings) != 0 {
+		t.Errorf("Expected 0 findings because of infrastructure Taint Breakers, got: %v", findings)
+	}
+}
+
+
+
 
 
 
