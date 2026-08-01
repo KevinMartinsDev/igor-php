@@ -47,7 +47,16 @@ class LeakDemoController extends AbstractController
         $html = "<h2>1. Stateful Service</h2>
                  <button onclick='window.location.reload()' style='padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;'>➕ Add Data (F5)</button>
                  <pre style='background: #f8f9fa; padding: 10px; border: 1px solid #ddd; margin-top: 10px;'>".print_r($this->statefulService->getData(), true)."</pre>";
-        return $this->renderLayout($html, true);
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/stateful-service')]\n" .
+                          "public function stateful(): Response {\n" .
+                          "    // Mutates the shared StatefulService by adding a new key on every request!\n" .
+                          "    \$this->statefulService->addData('req_' . time() . '_' . rand(1, 1000), 'I was here!');\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, 'src/Service/StatefulService.php', $controllerCode);
     }
 
     #[Route('/incomplete-reset')]
@@ -57,7 +66,16 @@ class LeakDemoController extends AbstractController
         $html = "<h2>2. Incomplete Reset</h2>
                  <button onclick='window.location.reload()' style='padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;'>⚡ Trigger Request (F5)</button>
                  <pre style='background: #f8f9fa; padding: 10px; border: 1px solid #ddd; margin-top: 10px;'>".print_r($this->incompleteResetService->getState(), true)."</pre>";
-        return $this->renderLayout($html, true);
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/incomplete-reset')]\n" .
+                          "public function incomplete(): Response {\n" .
+                          "    // Mutates the shared IncompleteResetService on every request\n" .
+                          "    \$this->incompleteResetService->addData('Value ' . time());\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, 'src/Service/IncompleteResetService.php', $controllerCode);
     }
 
     #[Route('/static-leak')]
@@ -67,7 +85,16 @@ class LeakDemoController extends AbstractController
         $html = "<h2>3. Static Property Leak</h2>
                  <button onclick='window.location.reload()' style='padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;'>🔄 Add Random User (F5)</button>
                  <pre style='background: #f8f9fa; padding: 10px; border: 1px solid #ddd; margin-top: 10px;'>".print_r($this->staticLeakService->get(), true)."</pre>";
-        return $this->renderLayout($html, true);
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/static-leak')]\n" .
+                          "public function staticLeak(): Response {\n" .
+                          "    // Calls a method that mutates a static array on the StaticLeakService\n" .
+                          "    \$this->staticLeakService->touch('User_' . rand(1, 100));\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, 'src/Service/StaticLeakService.php', $controllerCode);
     }
 
     #[Route('/heavy-load')]
@@ -93,7 +120,16 @@ class LeakDemoController extends AbstractController
                         <p style='margin-top: 20px; color: #666;'><i>Click until you see a 500 error. That's a memory leak in action!</i></p>
                     </div>
                  </div>";
-        return $this->renderLayout($html, true);
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/heavy-load')]\n" .
+                          "public function heavyLoad(): Response {\n" .
+                          "    // Injects 5MB of raw string into the StatefulService cache array on every request\n" .
+                          "    \$this->statefulService->addData('heavy_' . uniqid(), str_repeat('A', 5 * 1024 * 1024));\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, 'src/Service/StatefulService.php', $controllerCode);
     }
 
     #[Route('/check-timezone')]
@@ -104,7 +140,16 @@ class LeakDemoController extends AbstractController
                  <p>Current process timezone: <b>$tz</b></p>
                  <a href='/poison-timezone' style='display: inline-block; padding: 10px 20px; background: #ffc107; color: black; text-decoration: none; border-radius: 5px; font-weight: bold;'>☣️ Inject America/New_York</a>
                  <a href='/check-timezone' style='display: inline-block; padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px;'>🔍 Refresh Status</a>";
-        return $this->renderLayout($html, true);
+        
+        $customCode = "<?php\n" .
+                      "// Inside LeakDemoController.php:\n" .
+                      "#[Route('/poison-timezone')]\n" .
+                      "public function poisonTimezone(): Response {\n" .
+                      "    // This modifies the global PHP process timezone for this worker thread forever!\n" .
+                      "    date_default_timezone_set('America/New_York');\n" .
+                      "}";
+                      
+        return $this->renderLayout($html, true, null, $customCode);
     }
 
     #[Route('/poison-timezone')]
@@ -147,7 +192,18 @@ class LeakDemoController extends AbstractController
                  </div>
                  <a href='/poison-filters' style='display: inline-block; padding: 10px 20px; background: #dc3545; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;'>☣️ Disable Filter (via Local Variable)</a>
                  <a href='/doctrine-leak' style='display: inline-block; padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px;'>🔍 Refresh Status</a>";
-        return $this->renderLayout($html, true);
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/poison-filters')]\n" .
+                          "public function poisonFilters(): Response {\n" .
+                          "    // Resolves the shared EntityManager singleton into a local variable\n" .
+                          "    \$entityManager = \$this->entityManager;\n" .
+                          "    // Indirectly mutates its state globally by disabling a filter!\n" .
+                          "    \$entityManager->getFilters()->disable('softdeleteable');\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, 'src/Service/FakeEntityManager.php', $controllerCode);
     }
 
     #[Route('/poison-filters')]
@@ -166,16 +222,44 @@ class LeakDemoController extends AbstractController
         ");
     }
 
-    private function renderLayout(string $content, bool $showBack = false): Response
+    private function renderLayout(string $content, bool $showBack = false, ?string $codeFile = null, ?string $customCode = null): Response
     {
         $mem = number_format(memory_get_usage() / 1024 / 1024, 3);
         $peak = number_format(memory_get_peak_usage() / 1024 / 1024, 3);
         $back = $showBack ? "<br><br><a href='/' style='color: #666;'>⬅️ Back to Lab</a>" : "";
         
+        $codeBoxes = [];
+        if ($codeFile !== null) {
+            $fullPath = __DIR__ . '/../../' . $codeFile;
+            if (file_exists($fullPath)) {
+                $codeContent = file_get_contents($fullPath);
+                $escapedCode = htmlspecialchars($codeContent, ENT_QUOTES, 'UTF-8');
+                $codeBoxes[] = "
+                    <div style='margin-top: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;'>
+                        <div style='background: #2d3748; color: #cbd5e0; padding: 10px 15px; font-family: monospace; font-size: 0.85em; font-weight: bold; border-bottom: 1px solid #4a5568;'>
+                            📂 $codeFile (Service Implementation)
+                        </div>
+                        <pre style='background: #1a202c; color: #f7fafc; padding: 20px; margin: 0; overflow-x: auto; font-family: monospace; font-size: 0.9em; line-height: 1.5;'>$escapedCode</pre>
+                    </div>";
+            }
+        }
+        if ($customCode !== null) {
+            $escapedCode = htmlspecialchars($customCode, ENT_QUOTES, 'UTF-8');
+            $codeBoxes[] = "
+                <div style='margin-top: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;'>
+                    <div style='background: #2d3748; color: #cbd5e0; padding: 10px 15px; font-family: monospace; font-size: 0.85em; font-weight: bold; border-bottom: 1px solid #4a5568;'>
+                        ⚡ Controller Call Pattern
+                    </div>
+                    <pre style='background: #1a202c; color: #f7fafc; padding: 20px; margin: 0; overflow-x: auto; font-family: monospace; font-size: 0.9em; line-height: 1.5;'>$escapedCode</pre>
+                </div>";
+        }
+        $codeBoxHtml = implode('', $codeBoxes);
+
         $html = "
             <html>
             <body style='font-family: sans-serif; padding: 20px; line-height: 1.6;'>
                 $content 
+                $codeBoxHtml
                 $back 
                 <hr style='margin-top: 50px;'>
                 <div style='background: #333; color: #0f0; padding: 15px; font-family: monospace; border-radius: 5px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);'>
