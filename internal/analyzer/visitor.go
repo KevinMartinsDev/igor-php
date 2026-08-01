@@ -397,50 +397,50 @@ func (v *PHPVisitor) handleAssignment(n *sitter.Node) {
 
 		// If the left side is a simple variable (e.g. $entityManager)
 		if strings.HasPrefix(leftContent, "$") && !strings.Contains(leftContent, "->") && !strings.Contains(leftContent, "[") {
-			
-			// Heuristic 1: Instantiations using the 'new' keyword are always fresh/transient objects, never shared
-			if right.Kind() == "new_expression" || strings.HasPrefix(strings.TrimSpace(rightContent), "new ") {
-				return
-			}
-
 			leftLower := strings.ToLower(leftContent)
 			rightLower := strings.ToLower(rightContent)
 
-			// Heuristic 2: Ephemeral database QueryBuilders and Expressions are query-scoped, never shared across requests
-			isQueryOrExpr := strings.Contains(rightLower, "querybuilder") ||
-				strings.Contains(rightLower, "createquerybuilder") ||
-				strings.Contains(rightLower, "->expr(") ||
-				strings.Contains(rightLower, "->orx(") ||
-				strings.Contains(rightLower, "->andx(") ||
-				strings.Contains(leftLower, "querybuilder") ||
-				strings.Contains(leftLower, "expr")
-
-			if isQueryOrExpr {
+			if v.isTransientOrEphemeral(leftLower, rightLower, rightContent, right) {
 				return
 			}
 
-			isShared := false
-
-			// Scenario 1: RHS contains $this or self/static (which represents properties, methods or dependencies of the shared service class)
-			if strings.Contains(rightContent, "$this") || strings.Contains(strings.ToLower(rightContent), "self::") || strings.Contains(strings.ToLower(rightContent), "static::") {
-				isShared = true
-			}
-
-			// Scenario 2: RHS contains another already tracked local shared variable
-			if !isShared {
-				for trackedVar := range v.localSharedVars {
-					if strings.Contains(rightContent, trackedVar) {
-						isShared = true
-						break
-					}
-				}
-			}
-
-			if isShared {
+			if v.isRightSideShared(rightContent) {
 				v.localSharedVars[leftContent] = true
 			}
 		}
 	}
+}
+
+func (v *PHPVisitor) isTransientOrEphemeral(leftLower, rightLower, rightContent string, right *sitter.Node) bool {
+	// Heuristic 1: Instantiations using the 'new' keyword are always fresh/transient objects, never shared
+	if right.Kind() == "new_expression" || strings.HasPrefix(strings.TrimSpace(rightContent), "new ") {
+		return true
+	}
+
+	// Heuristic 2: Ephemeral database QueryBuilders and Expressions are query-scoped, never shared across requests
+	return strings.Contains(rightLower, "querybuilder") ||
+		strings.Contains(rightLower, "createquerybuilder") ||
+		strings.Contains(rightLower, "->expr(") ||
+		strings.Contains(rightLower, "->orx(") ||
+		strings.Contains(rightLower, "->andx(") ||
+		strings.Contains(leftLower, "querybuilder") ||
+		strings.Contains(leftLower, "expr")
+}
+
+func (v *PHPVisitor) isRightSideShared(rightContent string) bool {
+	// Scenario 1: RHS contains $this or self/static (which represents properties, methods or dependencies of the shared service class)
+	if strings.Contains(rightContent, "$this") || strings.Contains(strings.ToLower(rightContent), "self::") || strings.Contains(strings.ToLower(rightContent), "static::") {
+		return true
+	}
+
+	// Scenario 2: RHS contains another already tracked local shared variable
+	for trackedVar := range v.localSharedVars {
+		if strings.Contains(rightContent, trackedVar) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (v *PHPVisitor) handleScopedAccess(n *sitter.Node) {
@@ -717,9 +717,10 @@ func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 	curr := n
 	for curr != nil {
 		kind := curr.Kind()
-		if kind == "member_call_expression" || kind == "nullsafe_member_call_expression" {
+		switch kind {
+		case "member_call_expression", "nullsafe_member_call_expression":
 			curr = curr.ChildByFieldName("object")
-		} else if kind == "member_access_expression" || kind == "nullsafe_member_access_expression" {
+		case "member_access_expression", "nullsafe_member_access_expression":
 			obj := curr.ChildByFieldName("object")
 			if obj != nil {
 				// If the object's kind is NOT member_access_expression or member_call_expression,
@@ -738,19 +739,19 @@ func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 				}
 			}
 			curr = obj
-		} else if kind == "subscript_expression" {
+		case "subscript_expression":
 			if curr.ChildCount() > 0 {
 				curr = curr.Child(0)
 			} else {
-				break
+				curr = nil
 			}
-		} else {
+		default:
 			// If we reached a variable node, check if it's a tracked local shared variable
 			content := v.getContent(curr)
 			if strings.HasPrefix(content, "$") && v.localSharedVars[content] {
 				return strings.TrimPrefix(content, "$"), true
 			}
-			break
+			curr = nil
 		}
 	}
 	// Fallback check on final node
