@@ -415,10 +415,7 @@ func (v *PHPVisitor) handleAssignment(n *sitter.Node) {
 				strings.Contains(leftLower, "querybuilder") ||
 				strings.Contains(leftLower, "expr")
 
-			// Heuristic 3: OpenAPI metadata and Paths collections are configuration structures, never per-request user state
-			isOpenApi := strings.Contains(leftLower, "paths") || strings.Contains(leftLower, "openapi")
-
-			if isQueryOrExpr || isOpenApi {
+			if isQueryOrExpr {
 				return
 			}
 

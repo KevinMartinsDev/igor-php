@@ -526,10 +526,6 @@ class MyService {
         // Heuristic 2: QueryBuilders and Expressions
         $expr = $this->queryBuilder->expr()->orX();
         $expr->add('some_like_expr');
-
-        // Heuristic 3: OpenAPI
-        $paths = $openApi->getPaths();
-        $paths->addPath('/some-path', $pathItem);
     }
 }`
 	content := []byte(code)
