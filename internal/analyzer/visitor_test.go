@@ -480,5 +480,41 @@ class MyService implements Symfony\Contracts\Service\ResetInterface {
 	}
 }
 
+func TestPHPVisitor_DetectSingletonMutation_LocalSharedVariableTracking(t *testing.T) {
+	code := `<?php
+class DisableSoftDeleteableFilter {
+    protected function filterProperty() {
+        $entityManager = $this->getManagerRegistry()->getManagerForClass();
+        $entityManager->getFilters()->disable('softdeleteable');
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	found := false
+	expectedMsg := "Mutation detected on a local reference to a shared service ($entityManager). Risk of State Leak in a worker."
+	for _, f := range findings {
+		if f.Severity == "ERROR" && f.Message == expectedMsg {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected an ERROR finding for local variable tracking with message: %q, got: %v", expectedMsg, findings)
+	}
+}
+
+
 
 
