@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"fmt"
 	"testing"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -375,5 +376,109 @@ class ResettableService {
 		t.Errorf("Expected an IncompleteReset WARNING finding for missing reset because the class is marked resettable by Symfony, got: %v", findings)
 	}
 }
+
+func TestPHPVisitor_DetectSingletonMutation_NewPrefixes(t *testing.T) {
+	methods := []string{"disable", "enable", "clear", "remove"}
+	for _, m := range methods {
+		code := fmt.Sprintf(`<?php
+class MyService {
+    private $someInjectedProp;
+    public function set($v) {
+        $this->someInjectedProp->%s($v);
+    }
+}`, m)
+		content := []byte(code)
+
+		p := sitter.NewParser()
+		lang := sitter.NewLanguage(php.LanguagePHP())
+		_ = p.SetLanguage(lang)
+		tree := p.Parse(content, nil)
+		defer tree.Close()
+
+		engine := &mockEngine{}
+		v := NewVisitor(content, engine)
+		v.Walk(tree.RootNode())
+
+		findings := v.Findings()
+		found := false
+		expectedMsg := "Mutation detected on an injected dependency ($this->someInjectedProp). Risk of State Leak in a worker."
+		for _, f := range findings {
+			if f.Severity == "ERROR" && f.Message == expectedMsg {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Expected an ERROR finding with message: %q for method %s, got: %v", expectedMsg, m, findings)
+		}
+	}
+}
+
+func TestPHPVisitor_DetectSingletonMutation_ChainedCalls(t *testing.T) {
+	code := `<?php
+class MyService {
+    private $injectedRegistry;
+    public function update($v) {
+        $this->injectedRegistry->getManager()->getFilters()->disable($v);
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	found := false
+	expectedMsg := "Mutation detected on an injected dependency ($this->injectedRegistry). Risk of State Leak in a worker."
+	for _, f := range findings {
+		if f.Severity == "ERROR" && f.Message == expectedMsg {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected an ERROR finding for chained call with message: %q, got: %v", expectedMsg, findings)
+	}
+}
+
+func TestPHPVisitor_DetectSingletonMutation_ResetInterfaceException(t *testing.T) {
+	code := `<?php
+class MyService implements Symfony\Contracts\Service\ResetInterface {
+    private $injectedRegistry;
+    public function update($v) {
+        $this->injectedRegistry->getManager()->getFilters()->disable($v);
+    }
+    public function reset() {
+        // We do not reset the injected service reference itself, but we implement ResetInterface
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	// Should be 0 findings because class implements ResetInterface
+	if len(findings) != 0 {
+		t.Errorf("Expected 0 findings because the class implements ResetInterface, got: %v", findings)
+	}
+}
+
 
 
