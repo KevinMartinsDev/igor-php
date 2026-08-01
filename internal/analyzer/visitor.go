@@ -534,21 +534,23 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 	}
 	methodName := v.getContent(nameNode)
 
-	// 2. Check if the object is a property of the current class ($this->propertyName)
-	propName, isProp := v.isPropertyFetchOnThis(obj)
+	// 2. Check if the object/chain starts with a property of the current class ($this->propertyName)
+	propName, isProp := v.resolveRootProperty(obj)
 	if !isProp {
 		return
 	}
 
+	_, isDirectProp := v.isPropertyFetchOnThis(obj)
+
 	// Run Rule 1: DetectSingletonMutationRule
-	v.detectSingletonMutation(n, propName, methodName)
+	v.detectSingletonMutation(n, propName, methodName, isDirectProp)
 
 	// Run Rule 2: DetectClosureStateLeakRule
 	v.detectClosureStateLeak(n)
 }
 
 // detectSingletonMutation flags runtime mutations on injected dependencies unless they are resettable.
-func (v *PHPVisitor) detectSingletonMutation(n *sitter.Node, propName, methodName string) {
+func (v *PHPVisitor) detectSingletonMutation(n *sitter.Node, propName, methodName string, isDirectProp bool) {
 	if !hasMutationPrefix(methodName) {
 		return
 	}
@@ -556,11 +558,13 @@ func (v *PHPVisitor) detectSingletonMutation(n *sitter.Node, propName, methodNam
 	// If the current class implements ResetInterface, we treat this as a standard property mutation.
 	// It is allowed as long as the property itself is cleared/reset in the reset() method.
 	if v.isReset {
-		v.mutated[propName] = mutationInfo{
-			line:       int(n.StartPosition().Row) + 1,
-			code:       v.lines[n.StartPosition().Row],
-			snippet:    v.getContent(n),
-			astDetails: n.ToSexp(),
+		if isDirectProp {
+			v.mutated[propName] = mutationInfo{
+				line:       int(n.StartPosition().Row) + 1,
+				code:       v.lines[n.StartPosition().Row],
+				snippet:    v.getContent(n),
+				astDetails: n.ToSexp(),
+			}
 		}
 		return
 	}
@@ -632,9 +636,49 @@ func (v *PHPVisitor) isPropertyFetchOnThis(n *sitter.Node) (string, bool) {
 	return v.getContent(nameNode), true
 }
 
+// resolveRootProperty traverses down a chain of member calls, member accesses, and subscripts
+// to find if the root is a property fetch on $this, returning the property name.
+func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
+	curr := n
+	for curr != nil {
+		kind := curr.Kind()
+		if kind == "member_call_expression" || kind == "nullsafe_member_call_expression" {
+			curr = curr.ChildByFieldName("object")
+		} else if kind == "member_access_expression" || kind == "nullsafe_member_access_expression" {
+			obj := curr.ChildByFieldName("object")
+			if obj != nil {
+				// If the object's kind is NOT member_access_expression or member_call_expression,
+				// and it contains $this, then curr is the root property access on $this.
+				objKind := obj.Kind()
+				if objKind != "member_access_expression" && objKind != "nullsafe_member_access_expression" &&
+					objKind != "member_call_expression" && objKind != "nullsafe_member_call_expression" {
+					objContent := v.getContent(obj)
+					if strings.Contains(objContent, "$this") {
+						nameNode := curr.ChildByFieldName("name")
+						if nameNode != nil {
+							return v.getContent(nameNode), true
+						}
+						return "", false
+					}
+				}
+			}
+			curr = obj
+		} else if kind == "subscript_expression" {
+			if curr.ChildCount() > 0 {
+				curr = curr.Child(0)
+			} else {
+				break
+			}
+		} else {
+			break
+		}
+	}
+	return "", false
+}
+
 // hasMutationPrefix checks if the method name starts with a standard mutation prefix
 func hasMutationPrefix(methodName string) bool {
-	prefixes := []string{"add", "set", "push", "register", "append"}
+	prefixes := []string{"add", "set", "push", "register", "append", "disable", "enable", "clear", "remove"}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(methodName, prefix) {
 			// Ensure the prefix is properly bounded (e.g., camelCase/PascalCase) to avoid false positives like "settle" or "address"

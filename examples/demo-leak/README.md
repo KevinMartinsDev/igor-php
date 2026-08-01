@@ -20,6 +20,7 @@ Everything you see is stored **exclusively in PHP's RAM**.
 4.  **Global State Poisoning**: Changing process settings (Timezone).
 5.  **Memory Pressure**: See how RAM usage grows and STAYS high.
 6.  **The Danger of Exit/Die**: Killing the worker thread.
+7.  **Shared Service Indirect Mutation**: Disabling filters on an EntityManager instance fetched into a local variable, showing how its state is modified permanently for all future requests.
 
 ## 🛡️ How Igor-Php helps
 

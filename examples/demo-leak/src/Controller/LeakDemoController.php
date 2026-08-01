@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Service\FakeEntityManager;
 use App\Service\IncompleteResetService;
 use App\Service\StatefulService;
 use App\Service\StaticLeakService;
@@ -15,6 +16,7 @@ class LeakDemoController extends AbstractController
         private StatefulService $statefulService,
         private IncompleteResetService $incompleteResetService,
         private StaticLeakService $staticLeakService,
+        private FakeEntityManager $entityManager,
     ) {}
 
     #[Route('/', name: 'demo_index')]
@@ -33,6 +35,7 @@ class LeakDemoController extends AbstractController
                 <li><a href='/check-timezone'>4. Global State Poisoning</a></li>
                 <li><a href='/heavy-load' style='color: #dc3545; font-weight: bold;'>5. 🎮 CHALLENGE: Out of Memory Game</a></li>
                 <li><a href='/exit'>6. The Danger of Exit/Die</a></li>
+                <li><a href='/doctrine-leak' style='color: #28a745; font-weight: bold;'>7. Shared Service Indirect Mutation (Doctrine Filters Leak)</a></li>
             </ul>
         ");
     }
@@ -127,6 +130,40 @@ class LeakDemoController extends AbstractController
                 <a href='/' style='padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;'>⬅️ Restart & Back to Lab</a>
             </body>";
         exit();
+    }
+
+    #[Route('/doctrine-leak')]
+    public function doctrineLeak(): Response
+    {
+        $isEnabled = $this->entityManager->getFilters()->isEnabled('softdeleteable');
+        $statusStr = $isEnabled ? "<span style='color: #28a745; font-weight: bold;'>ENABLED (Safe)</span>" : "<span style='color: #dc3545; font-weight: bold;'>DISABLED (LEAKING!)</span>";
+        
+        $html = "<h2>7. Shared Service Indirect Mutation (Doctrine Filters)</h2>
+                 <p>Doctrine softdeleteable filter is currently: $statusStr</p>
+                 <div style='background: #f8f9fa; padding: 15px; border-left: 5px solid #007bff; margin-bottom: 20px;'>
+                    <b>🧠 The Leak scenario:</b> Imagine a filter that resolves the <code>EntityManager</code> from the registry (into a local variable) 
+                    and then disables the softdeleteable filter. Because the <code>EntityManager</code> is a shared service (Singleton), 
+                    the filter is now disabled in the <b>entire process memory</b> for all subsequent requests!
+                 </div>
+                 <a href='/poison-filters' style='display: inline-block; padding: 10px 20px; background: #dc3545; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;'>☣️ Disable Filter (via Local Variable)</a>
+                 <a href='/doctrine-leak' style='display: inline-block; padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px;'>🔍 Refresh Status</a>";
+        return $this->renderLayout($html, true);
+    }
+
+    #[Route('/poison-filters')]
+    public function poisonFilters(): Response
+    {
+        // We simulate resolving the entityManager into a local variable and mutating its shared state!
+        $entityManager = $this->entityManager;
+        $entityManager->getFilters()->disable('softdeleteable');
+        
+        return new Response("
+            <body style='font-family: sans-serif; padding: 20px; text-align: center; padding-top: 50px;'>
+                <h1 style='color: #dc3545;'>⚡ Poison injected!</h1>
+                <p>The softdeleteable filter has been disabled on the shared EntityManager singleton in RAM.</p>
+                <a href='/doctrine-leak' style='padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;'>⬅️ Go back and check the leak!</a>
+            </body>
+        ");
     }
 
     private function renderLayout(string $content, bool $showBack = false): Response
