@@ -44,6 +44,7 @@ type PHPVisitor struct {
 	engine             Engine
 	dependencies       []string
 	nonSharedServices  NonSharedServiceMap
+	localSharedVars    map[string]bool
 }
 
 // NewVisitor creates a new instance of the PHPVisitor.
@@ -57,6 +58,7 @@ func NewVisitor(content []byte, engine Engine) *PHPVisitor {
 		workerSafeProps: make(map[string]bool),
 		propertyTypes:   make(map[string]string),
 		finallyCleaned:  make(map[string]bool),
+		localSharedVars: make(map[string]bool),
 		engine:          engine,
 	}
 }
@@ -99,9 +101,10 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		}
 		v.isWorkerSafeMethod = v.hasAttribute(n, "WorkerSafe")
 		v.finallyCleaned = make(map[string]bool)
+		v.localSharedVars = make(map[string]bool)
 		v.preScanFinallyCleanups(n)
 	case "assignment_expression", "augmented_assignment_expression":
-		v.handleMutation(n.ChildByFieldName("left"))
+		v.handleAssignment(n)
 	case "update_expression":
 		v.handleMutation(n)
 	case "unset_statement":
@@ -373,6 +376,51 @@ func (v *PHPVisitor) handleMemberAccess(n *sitter.Node) {
 	}
 }
 
+// handleAssignment handles variable assignments and tracks variables holding references to shared dependencies/services.
+func (v *PHPVisitor) handleAssignment(n *sitter.Node) {
+	if n == nil {
+		return
+	}
+
+	left := n.ChildByFieldName("left")
+	right := n.ChildByFieldName("right")
+
+	// Standard mutation detection on left side
+	if left != nil {
+		v.handleMutation(left)
+	}
+
+	// Dynamic local shared variable tracking
+	if left != nil && right != nil {
+		leftContent := v.getContent(left)
+		rightContent := v.getContent(right)
+
+		// If the left side is a simple variable (e.g. $entityManager)
+		if strings.HasPrefix(leftContent, "$") && !strings.Contains(leftContent, "->") && !strings.Contains(leftContent, "[") {
+			isShared := false
+
+			// Scenario 1: RHS contains $this or self/static (which represents properties, methods or dependencies of the shared service class)
+			if strings.Contains(rightContent, "$this") || strings.Contains(strings.ToLower(rightContent), "self::") || strings.Contains(strings.ToLower(rightContent), "static::") {
+				isShared = true
+			}
+
+			// Scenario 2: RHS contains another already tracked local shared variable
+			if !isShared {
+				for trackedVar := range v.localSharedVars {
+					if strings.Contains(rightContent, trackedVar) {
+						isShared = true
+						break
+					}
+				}
+			}
+
+			if isShared {
+				v.localSharedVars[leftContent] = true
+			}
+		}
+	}
+}
+
 func (v *PHPVisitor) handleScopedAccess(n *sitter.Node) {
 	scope := n.ChildByFieldName("scope")
 	if scope != nil {
@@ -579,7 +627,12 @@ func (v *PHPVisitor) detectSingletonMutation(n *sitter.Node, propName, methodNam
 	}
 
 	if !isResettable {
-		msg := fmt.Sprintf("Mutation detected on an injected dependency ($this->%s). Risk of State Leak in a worker.", propName)
+		var msg string
+		if v.localSharedVars["$"+propName] {
+			msg = fmt.Sprintf("Mutation detected on a local reference to a shared service ($%s). Risk of State Leak in a worker.", propName)
+		} else {
+			msg = fmt.Sprintf("Mutation detected on an injected dependency ($this->%s). Risk of State Leak in a worker.", propName)
+		}
 		v.addFinding(n, msg, "Avoid modifying injected dependencies at runtime, or use a ResetInterface.", "ERROR")
 	}
 }
@@ -637,7 +690,7 @@ func (v *PHPVisitor) isPropertyFetchOnThis(n *sitter.Node) (string, bool) {
 }
 
 // resolveRootProperty traverses down a chain of member calls, member accesses, and subscripts
-// to find if the root is a property fetch on $this, returning the property name.
+// to find if the root is a property fetch on $this (or a tracked local shared variable).
 func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 	curr := n
 	for curr != nil {
@@ -670,7 +723,19 @@ func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 				break
 			}
 		} else {
+			// If we reached a variable node, check if it's a tracked local shared variable
+			content := v.getContent(curr)
+			if strings.HasPrefix(content, "$") && v.localSharedVars[content] {
+				return strings.TrimPrefix(content, "$"), true
+			}
 			break
+		}
+	}
+	// Fallback check on final node
+	if curr != nil {
+		content := v.getContent(curr)
+		if strings.HasPrefix(content, "$") && v.localSharedVars[content] {
+			return strings.TrimPrefix(content, "$"), true
 		}
 	}
 	return "", false
