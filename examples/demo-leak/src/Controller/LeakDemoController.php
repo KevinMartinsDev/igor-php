@@ -288,17 +288,28 @@ class LeakDemoController extends AbstractController
     #[Route('/superglobals')]
     public function superglobals(): Response
     {
+        if (isset($_GET['action']) && $_GET['action'] === 'poison-env') {
+            $_ENV['APP_THEME'] = 'dark';
+        }
+        
+        $theme = $_ENV['APP_THEME'] ?? 'light';
+        $themeStatus = $theme === 'dark' ? "<span style='color: #dc3545; font-weight: bold;'>DARK (Poisoned!)</span>" : "<span style='color: #28a745; font-weight: bold;'>LIGHT (Clean)</span>";
+        
         // Simulate reading directly from $_GET
         $name = $_GET['name'] ?? 'Stranger';
         
         $html = "<h2>10. PHP Superglobals Usage</h2>
                  <p>Hello, <b>" . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "</b>!</p>
+                 <p>Current APP_THEME inside <code>\$_ENV</code>: $themeStatus</p>
                  <div style='background: #f8f9fa; padding: 15px; border-left: 5px solid #007bff; margin-bottom: 20px;'>
-                    <b>🧠 The Leak scenario:</b> Directly reading from legacy superglobals like <code>\$_GET</code> or <code>\$_POST</code> 
-                    bypasses the framework's Request abstraction. In some persistent environments, these superglobals can leak values 
-                    or get polluted between requests, or lead to hard-to-debug behaviors, which is why Igor strongly warns against them.
+                    <b>🧠 The Leak scenario:</b> Directly reading or writing legacy superglobals like <code>\$_GET</code> or <code>\$_ENV</code> is dangerous. 
+                    While FrankenPHP resets <code>\$_GET</code> on every request, writing to <code>\$_ENV</code> (or calling <code>putenv()</code>) 
+                    poisons the global process memory. All future requests will inherit this poisoned environment state!
                  </div>
-                 <form method='GET' action='/superglobals' style='margin-top: 15px;'>
+                 <a href='/superglobals?action=poison-env' style='display: inline-block; padding: 10px 20px; background: #dc3545; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;'>☣️ Write to \$_ENV['APP_THEME']</a>
+                 <a href='/superglobals' style='display: inline-block; padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px;'>🔍 Refresh Status</a>
+                 
+                 <form method='GET' action='/superglobals' style='margin-top: 25px;'>
                     <input type='text' name='name' placeholder='Type your name...' style='padding: 10px; border-radius: 5px; border: 1px solid #ccc;' required>
                     <button type='submit' style='padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; margin-left: 10px;'>👋 Greet Me!</button>
                  </form>";
@@ -307,8 +318,11 @@ class LeakDemoController extends AbstractController
                           "// Inside LeakDemoController.php:\n" .
                           "#[Route('/superglobals')]\n" .
                           "public function superglobals(): Response {\n" .
-                          "    // Reading directly from legacy \$_GET superglobal!\n" .
-                          "    \$name = \$_GET['name'] ?? 'Stranger';\n" .
+                          "    // Writing to legacy \$_ENV superglobal permanently poisons the process!\n" .
+                          "    if (isset(\$_GET['action']) && \$_GET['action'] === 'poison-env') {\n" .
+                          "        \$_ENV['APP_THEME'] = 'dark';\n" .
+                          "    }\n" .
+                          "    \$theme = \$_ENV['APP_THEME'] ?? 'light';\n" .
                           "}";
                           
         return $this->renderLayout($html, true, null, $controllerCode);
