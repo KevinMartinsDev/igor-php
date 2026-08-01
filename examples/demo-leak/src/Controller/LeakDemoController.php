@@ -2,6 +2,8 @@
 
 namespace App\Controller;
 
+use App\Service\ClosureLeakService;
+use App\Service\LocalStaticService;
 use App\Service\FakeEntityManager;
 use App\Service\IncompleteResetService;
 use App\Service\StatefulService;
@@ -17,6 +19,8 @@ class LeakDemoController extends AbstractController
         private IncompleteResetService $incompleteResetService,
         private StaticLeakService $staticLeakService,
         private FakeEntityManager $entityManager,
+        private ClosureLeakService $closureLeakService,
+        private LocalStaticService $localStaticService,
     ) {}
 
     #[Route('/', name: 'demo_index')]
@@ -36,6 +40,9 @@ class LeakDemoController extends AbstractController
                 <li><a href='/heavy-load' style='color: #dc3545; font-weight: bold;'>5. 🎮 CHALLENGE: Out of Memory Game</a></li>
                 <li><a href='/exit'>6. The Danger of Exit/Die</a></li>
                 <li><a href='/doctrine-leak' style='color: #28a745; font-weight: bold;'>7. Shared Service Indirect Mutation (Doctrine Filters Leak)</a></li>
+                <li><a href='/closure-leak'>8. Closure State Leak</a></li>
+                <li><a href='/local-static'>9. Local Static Variable</a></li>
+                <li><a href='/superglobals'>10. PHP Superglobals</a></li>
             </ul>
         ");
     }
@@ -220,6 +227,91 @@ class LeakDemoController extends AbstractController
                 <a href='/doctrine-leak' style='padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;'>⬅️ Go back and check the leak!</a>
             </body>
         ");
+    }
+
+    #[Route('/closure-leak')]
+    public function closureLeak(): Response
+    {
+        $v = 'State captured at ' . time();
+        $this->closureLeakService->addListener('request', function () use ($v) {
+            return $v;
+        });
+
+        $html = "<h2>8. Closure State Leak</h2>
+                 <p>Listeners currently registered on the shared service: <b>" . count($this->closureLeakService->getListeners()['request'] ?? []) . "</b></p>
+                 <div style='background: #f8f9fa; padding: 15px; border-left: 5px solid #007bff; margin-bottom: 20px;'>
+                    <b>🧠 The Leak scenario:</b> We pass an anonymous function (closure) to a shared service. 
+                    If this closure captures any local variables using the <code>use ()</code> clause, those variables and 
+                    their whole context are kept alive in PHP's RAM as long as the shared service lives (forever in Worker mode)!
+                 </div>
+                 <button onclick='window.location.reload()' style='padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;'>⚡ Trigger Request & Leak State (F5)</button>";
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/closure-leak')]\n" .
+                          "public function closureLeak(): Response {\n" .
+                          "    \$v = 'State captured at ' . time();\n" .
+                          "    // Passing a closure capturing local \$v to the shared ClosureLeakService listener array!\n" .
+                          "    \$this->closureLeakService->addListener('request', function () use (\$v) {\n" .
+                          "        return \$v;\n" .
+                          "    });\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, 'src/Service/ClosureLeakService.php', $controllerCode);
+    }
+
+    #[Route('/local-static')]
+    public function localStatic(): Response
+    {
+        $calls = $this->localStaticService->incrementAndGet();
+
+        $html = "<h2>9. Local Static Variable</h2>
+                 <p>This service method has been called: <b>$calls</b> times across all requests on this worker thread.</p>
+                 <div style='background: #f8f9fa; padding: 15px; border-left: 5px solid #007bff; margin-bottom: 20px;'>
+                    <b>🧠 The Leak scenario:</b> Declaring a variable as <code>static</code> inside a method keeps its value alive 
+                    across all executions of that method. Since the service instance lives forever in Worker mode, 
+                    this local variable becomes a global state shared across all requests!
+                 </div>
+                 <button onclick='window.location.reload()' style='padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;'>➕ Increment Call Count (F5)</button>";
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/local-static')]\n" .
+                          "public function localStatic(): Response {\n" .
+                          "    // Calls incrementAndGet() which has an internal static variable!\n" .
+                          "    \$calls = \$this->localStaticService->incrementAndGet();\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, 'src/Service/LocalStaticService.php', $controllerCode);
+    }
+
+    #[Route('/superglobals')]
+    public function superglobals(): Response
+    {
+        // Simulate reading directly from $_GET
+        $name = $_GET['name'] ?? 'Stranger';
+        
+        $html = "<h2>10. PHP Superglobals Usage</h2>
+                 <p>Hello, <b>" . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "</b>!</p>
+                 <div style='background: #f8f9fa; padding: 15px; border-left: 5px solid #007bff; margin-bottom: 20px;'>
+                    <b>🧠 The Leak scenario:</b> Directly reading from legacy superglobals like <code>\$_GET</code> or <code>\$_POST</code> 
+                    bypasses the framework's Request abstraction. In some persistent environments, these superglobals can leak values 
+                    or get polluted between requests, or lead to hard-to-debug behaviors, which is why Igor strongly warns against them.
+                 </div>
+                 <form method='GET' action='/superglobals' style='margin-top: 15px;'>
+                    <input type='text' name='name' placeholder='Type your name...' style='padding: 10px; border-radius: 5px; border: 1px solid #ccc;' required>
+                    <button type='submit' style='padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; margin-left: 10px;'>👋 Greet Me!</button>
+                 </form>";
+                 
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/superglobals')]\n" .
+                          "public function superglobals(): Response {\n" .
+                          "    // Reading directly from legacy \$_GET superglobal!\n" .
+                          "    \$name = \$_GET['name'] ?? 'Stranger';\n" .
+                          "}";
+                          
+        return $this->renderLayout($html, true, null, $controllerCode);
     }
 
     private function renderLayout(string $content, bool $showBack = false, ?string $codeFile = null, ?string $customCode = null): Response
