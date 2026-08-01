@@ -397,6 +397,31 @@ func (v *PHPVisitor) handleAssignment(n *sitter.Node) {
 
 		// If the left side is a simple variable (e.g. $entityManager)
 		if strings.HasPrefix(leftContent, "$") && !strings.Contains(leftContent, "->") && !strings.Contains(leftContent, "[") {
+			
+			// Heuristic 1: Instantiations using the 'new' keyword are always fresh/transient objects, never shared
+			if right.Kind() == "new_expression" || strings.HasPrefix(strings.TrimSpace(rightContent), "new ") {
+				return
+			}
+
+			leftLower := strings.ToLower(leftContent)
+			rightLower := strings.ToLower(rightContent)
+
+			// Heuristic 2: Ephemeral database QueryBuilders and Expressions are query-scoped, never shared across requests
+			isQueryOrExpr := strings.Contains(rightLower, "querybuilder") ||
+				strings.Contains(rightLower, "createquerybuilder") ||
+				strings.Contains(rightLower, "->expr(") ||
+				strings.Contains(rightLower, "->orx(") ||
+				strings.Contains(rightLower, "->andx(") ||
+				strings.Contains(leftLower, "querybuilder") ||
+				strings.Contains(leftLower, "expr")
+
+			// Heuristic 3: OpenAPI metadata and Paths collections are configuration structures, never per-request user state
+			isOpenApi := strings.Contains(leftLower, "paths") || strings.Contains(leftLower, "openapi")
+
+			if isQueryOrExpr || isOpenApi {
+				return
+			}
+
 			isShared := false
 
 			// Scenario 1: RHS contains $this or self/static (which represents properties, methods or dependencies of the shared service class)

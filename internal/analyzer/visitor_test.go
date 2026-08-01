@@ -515,6 +515,43 @@ class DisableSoftDeleteableFilter {
 	}
 }
 
+func TestPHPVisitor_DetectSingletonMutation_HeuristicsBypass(t *testing.T) {
+	code := `<?php
+class MyService {
+    public function test() {
+        // Heuristic 1: new instantiations
+        $ticket = new Ticket();
+        $ticket->setIsConnectionAllowed(true);
+
+        // Heuristic 2: QueryBuilders and Expressions
+        $expr = $this->queryBuilder->expr()->orX();
+        $expr->add('some_like_expr');
+
+        // Heuristic 3: OpenAPI
+        $paths = $openApi->getPaths();
+        $paths->addPath('/some-path', $pathItem);
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	// Should be 0 findings because all mutations are bypassed by our smart heuristics
+	if len(findings) != 0 {
+		t.Errorf("Expected 0 findings because of smart heuristics bypass, got: %v", findings)
+	}
+}
+
+
 
 
 
