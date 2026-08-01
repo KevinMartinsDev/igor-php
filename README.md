@@ -33,7 +33,7 @@ During its static analysis of shared/singleton services, Igor recursively scans 
 
 | Category | Pattern / Rule | Description | Impact Level | Code Example |
 | :--- | :--- | :--- | :---: | :--- |
-| **Dependency Mutation** | `DetectSingletonMutation` | Calling mutation methods (starting with `set`, `add`, `push`, `register`, `append`) on injected properties. | 🔴 Critical | `$this->googleTagManager->addPush($data);` |
+| **Dependency Mutation** | `DetectSingletonMutation` | Calling mutation methods (starting with `set`, `add`, `push`, `register`, `append`, `disable`, `enable`, `clear`, `remove`) on injected properties, chained method calls, or local references of shared services (with smart alias tracking). | 🔴 Critical | `$this->googleTagManager->addPush($data);`<br>`$entityManager->getFilters()->disable('softdeleteable');` |
 | **Resettable Bypass** | *(Bypass)* | Igor automatically resolves Symfony autowire aliases and abstract interface/implementation chains to see if the dependency is marked as resettable, and **ignores mutation warnings** on it. | 🟢 Safe (Auto) | `$this->translator->setLanguage($lang);`<br>*(if translator is resettable)* |
 | **Closure State Leak** | `DetectClosureStateLeak` | Passing anonymous functions that capture local variables (`use ($var)`) to shared service dependencies. | 🔴 Critical | `$this->dispatcher->addListener('response', function () use ($optin) {});` |
 | **Finally Cleanup** | *(Bypass)* | Igor natively detects when a mutated state is guaranteed to be cleaned up inside a `finally` block (using `array_pop`, `unset`, or direct assignments), and **automatically bypasses the error**. | 🟢 Safe (Auto) | `try { $this->stack[] = $item; } finally { array_pop($this->stack); }` |
