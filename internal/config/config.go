@@ -54,6 +54,9 @@ func LoadConfig(root string, customConfigPath string) Config {
 	if len(userConfig.SafeNamespaces) > 0 {
 		c.SafeNamespaces = userConfig.SafeNamespaces
 	}
+	if userConfig.IgnoreVendors {
+		c.IgnoreVendors = true
+	}
 	if userConfig.BaselinePath != "" {
 	        c.BaselinePath = userConfig.BaselinePath
 	}
