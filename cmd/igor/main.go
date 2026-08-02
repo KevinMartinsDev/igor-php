@@ -488,64 +488,69 @@ func collectLocalFiles(rootPath string, cfg config.Config, aud *auditor.Auditor,
 	return list
 }
 
+func shouldSkipServiceMeta(id string, def symbol.SymfonyService, aud *auditor.Auditor) (bool, string) {
+	if strings.HasPrefix(id, ".errored.") {
+		return true, "container error"
+	}
+	if !def.Shared {
+		return true, "non-shared (prototype)"
+	}
+	if def.Class == "" {
+		return true, "no class defined"
+	}
+	if aud.IsSafeNamespace(def.Class) {
+		return true, fmt.Sprintf("class %s belongs to a safe namespace", def.Class)
+	}
+	return false, ""
+}
+
+func shouldSkipServicePath(id string, path string, cfg config.Config, aud *auditor.Auditor, rootPath string) (bool, string) {
+	if cfg.IsExcluded(path, rootPath) {
+		return true, fmt.Sprintf("path %s is excluded", path)
+	}
+	if aud.IsDevPackagePath(path) {
+		return true, "belongs to a dev package"
+	}
+	if cfg.IgnoreVendors && (symbol.AuditStatus{FilePath: path}).IsVendor(rootPath) {
+		return true, "belongs to vendor directory"
+	}
+	return false, ""
+}
+
 func collectSymfonyServices(rootPath string, cfg config.Config, aud *auditor.Auditor, processed map[string]bool) []symbol.AuditStatus {
 	var list []symbol.AuditStatus
 	for id, def := range aud.Symfony.Container.Definitions {
-	        if strings.HasPrefix(id, ".errored.") {
-	                if cfg.Verbose {
-	                        fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': container error\n", id)
-	                }
-	                continue
-	        }
-	        if !def.Shared {
-	                if cfg.Verbose {
-	                        fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': non-shared (prototype)\n", id)
-	                }
-	                continue
-	        }
-	        if def.Class == "" {
-	                if cfg.Verbose {
-	                        fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': no class defined\n", id)
-	                }
-	                continue
-	        }
-	        if aud.IsSafeNamespace(def.Class) {
-	                if cfg.Verbose {
-	                        fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': class %s belongs to a safe namespace\n", id, def.Class)
-	                }
-	                continue
-	        }
+		if skip, reason := shouldSkipServiceMeta(id, def, aud); skip {
+			if cfg.Verbose {
+				fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': %s\n", id, reason)
+			}
+			continue
+		}
 
-	        if path, found := aud.Symfony.ClassToFile[def.Class]; found {
-	                if cfg.IsExcluded(path, rootPath) {
-	                        if cfg.Verbose {
-	                                fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': path %s is excluded\n", id, path)
-	                        }
-	                        continue
-	                }
-	                if aud.IsDevPackagePath(path) {
-	                        if cfg.Verbose {
-	                                fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': belongs to a dev package\n", id)
-	                        }
-	                        continue
-	                }
-	                if !processed[path] {
-	                        deps := extractDependencies(def)
-	                        list = append(list, symbol.AuditStatus{
-	                                ServiceID:    id,
-	                                FilePath:     path,
-	                                Status:       "⏳ PENDING",
-	                                Dependencies: deps,
-	                                IsShared:     def.Shared,
-	                                IsPublic:     def.Public,
-	                        })
-	                        processed[path] = true
-	                } else if cfg.Verbose {
-	                        fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': file already scheduled for audit\n", id)
-	                }
-	        } else if cfg.Verbose {
-	                fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': could not locate file for class %s\n", id, def.Class)
-	        }
+		if path, found := aud.Symfony.ClassToFile[def.Class]; found {
+			if skip, reason := shouldSkipServicePath(id, path, cfg, aud, rootPath); skip {
+				if cfg.Verbose {
+					fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': %s\n", id, reason)
+				}
+				continue
+			}
+			if !processed[path] {
+				deps := extractDependencies(def)
+				list = append(list, symbol.AuditStatus{
+					ServiceID:    id,
+					FilePath:     path,
+					Status:       "⏳ PENDING",
+					Dependencies: deps,
+					IsShared:     def.Shared,
+					IsPublic:     def.Public,
+				})
+				processed[path] = true
+			} else if cfg.Verbose {
+				fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': file already scheduled for audit\n", id)
+			}
+		} else if cfg.Verbose {
+			fmt.Fprintf(os.Stderr, "  ⏭️  Skipped service '%s': could not locate file for class %s\n", id, def.Class)
+		}
 	}
 
 	return list

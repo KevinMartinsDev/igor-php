@@ -267,6 +267,7 @@ You can customize Igor's behavior by creating an `igor.json` file at the root of
   "exclude": ["vendor", "tests", "Entity"],
   "safe_namespaces": ["Symfony\\", "Doctrine\\", "IgorPhp\\IgorBundle\\"],
   "scan_vendors": ["my-company/internal-bundle"],
+  "ignore_vendors": false,
   "baseline": "igor-baseline.json",
   "container_dump": "igor-container.json",
   "console_path": "bin/console",
@@ -278,6 +279,7 @@ You can customize Igor's behavior by creating an `igor.json` file at the root of
 - **exclude**: List of directories to skip during indexing.
 - **safe_namespaces**: Igor will ignore state mutations in classes starting with these prefixes.
 - **scan_vendors**: List of sub-directories within `vendor/` to scan recursively.
+- **ignore_vendors**: Set to `true` to skip auditing all services located within the `vendor/` directory. Defaults to `false`.
 - **baseline**: Path to a baseline file containing findings to ignore.
 - **container_dump**: Path to a generic container dump JSON (`{ "services": [ { "class": ..., "shared": bool } ] }`) listing non-shared/transient classes to skip. Equivalent to the `--container-dump` flag.
 - **console_path**: Custom path to the Symfony console binary. Defaults to `bin/console`.

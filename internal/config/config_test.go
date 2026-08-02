@@ -24,7 +24,7 @@ func TestLoadConfig(t *testing.T) {
 	})
 
 	t.Run("Valid config file", func(t *testing.T) {
-		content := `{"exclude": ["custom"], "safe_namespaces": ["My\\"]}`
+		content := `{"exclude": ["custom"], "safe_namespaces": ["My\\"], "ignore_vendors": true}`
 		err := os.WriteFile(filepath.Join(tmpDir, "igor.json"), []byte(content), 0644)
 		if err != nil {
 			t.Fatal(err)
@@ -35,6 +35,9 @@ func TestLoadConfig(t *testing.T) {
 		}
 		if cfg.SafeNamespaces[0] != "My\\" {
 			t.Errorf("Expected 'My\\' namespace, got %v", cfg.SafeNamespaces)
+		}
+		if !cfg.IgnoreVendors {
+			t.Errorf("Expected IgnoreVendors to be true, got %v", cfg.IgnoreVendors)
 		}
 	})
 

@@ -5,6 +5,7 @@ type Config struct {
         Exclude          []string `json:"exclude"`
         SafeNamespaces   []string `json:"safe_namespaces"`
         ScanVendors      []string `json:"scan_vendors"`
+        IgnoreVendors    bool     `json:"ignore_vendors"`
         ConsolePath      string   `json:"console_path"`
         Env              string   `json:"env"`
         Verbose          bool     `json:"verbose"`
