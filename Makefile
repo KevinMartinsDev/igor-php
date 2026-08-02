@@ -1,4 +1,4 @@
-.PHONY: build test lint clean
+.PHONY: build test lint ci clean
 
 # Build the main binary
 build:
@@ -11,6 +11,9 @@ test:
 # Run the linter
 lint:
 	golangci-lint run ./...
+
+# Run all CI checks locally
+ci: build test lint
 
 # Clean the build directory
 clean:
