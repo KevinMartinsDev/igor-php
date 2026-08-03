@@ -8,7 +8,7 @@ on:
 
 jobs:
   lint:
-    name: Lint
+    name: Lint Go Code
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,19 +23,47 @@ jobs:
           install-mode: goinstall
           args: --timeout=5m
 
-  test:
-    name: Test
+  composer-validate:
+    name: Validate Composer Config
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Validate Composer
+        run: composer validate --strict
+
+  php-lint:
+    name: Lint PHP Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - name: Run PHP Lint
+        run: |
+          find src/ bin/ test/ -name "*.php" -print0 | xargs -0 -n1 php -l
+
+  test:
+    name: Test on ${{ matrix.os }} (PHP ${{ matrix.php-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        php-version: ['8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version: '1.26.2'
       
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
-      
-      - name: Run Tests
-        run: go test -v ./...
+          php-version: ${{ matrix.php-version }}
+          
+      - name: Run Tests with Race Detector
+        run: go test -race -v ./...
