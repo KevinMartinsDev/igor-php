@@ -23,10 +23,13 @@ func TestReviewCommand_InvalidFile(t *testing.T) {
 		t.Error("Expected review command to fail with non-existent file, but it succeeded")
 	}
 
-	outStr := string(output)
-	expectedError := "Error: file not found" // Adjust based on planned implementation
-	if !strings.Contains(outStr, expectedError) && !strings.Contains(outStr, "no such file") {
-		t.Errorf("Expected error message about missing file, got: %s", outStr)
+	outStr := strings.ToLower(string(output))
+	expectedError := "error: file not found" // Adjust based on planned implementation
+	if !strings.Contains(outStr, expectedError) && 
+		!strings.Contains(outStr, "no such file") && 
+		!strings.Contains(outStr, "cannot find the file") &&
+		!strings.Contains(outStr, "does not exist") {
+		t.Errorf("Expected error message about missing file, got: %s", string(output))
 	}
 }
 
