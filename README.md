@@ -127,7 +127,7 @@ Once initialized (or using defaults), let Igor audit your project:
 igor-php .
 
 # Generate a baseline to ignore existing errors
-igor-php --generate-baseline
+igor-php --generate-baseline .
 
 # Custom configuration file
 igor-php --config custom-igor.json .
