@@ -95,8 +95,8 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.LLMConfig.APIUrl != "https://api.openai.com/v1" {
 		        t.Errorf("Expected API URL, got %s", cfg.LLMConfig.APIUrl)
 		}
-		if cfg.LLMConfig.ApiKeyEnv != "OPENAI_API_KEY" {
-		        t.Errorf("Expected API Key Env, got %s", cfg.LLMConfig.ApiKeyEnv)
+		if cfg.LLMConfig.APIKeyEnv != "OPENAI_API_KEY" {
+		        t.Errorf("Expected API Key Env, got %s", cfg.LLMConfig.APIKeyEnv)
 		}
 		if cfg.LLMConfig.Model != "gpt-4o" {
 		        t.Errorf("Expected Model, got %s", cfg.LLMConfig.Model)

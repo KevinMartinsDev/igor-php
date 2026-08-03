@@ -61,7 +61,7 @@ func NewLLMReporter(version string) Reporter {
 }
 
 // PrintHeader is a no-op for LLMReporter.
-func (r *LLMReporter) PrintHeader(count int) {}
+func (r *LLMReporter) PrintHeader(_ int) {}
 
 // PrintProjectHeader is a no-op for LLMReporter.
 func (r *LLMReporter) PrintProjectHeader() {}
@@ -70,7 +70,7 @@ func (r *LLMReporter) PrintProjectHeader() {}
 func (r *LLMReporter) PrintVendorHeader() {}
 
 // PrintFindings collects warnings to be exported later.
-func (r *LLMReporter) PrintFindings(res symbol.AuditStatus, projectRoot string, isVendor bool) {
+func (r *LLMReporter) PrintFindings(res symbol.AuditStatus, _ string, _ bool) {
 	for _, f := range res.Findings {
 		w := LLMWarning{
 			FilePath:   res.FilePath,
@@ -94,7 +94,7 @@ func (r *LLMReporter) PrintFindings(res symbol.AuditStatus, projectRoot string, 
 }
 
 // PrintSummary outputs the accumulated warnings as a JSON object.
-func (r *LLMReporter) PrintSummary(results []symbol.AuditStatus, projectRoot string) bool {
+func (r *LLMReporter) PrintSummary(_ []symbol.AuditStatus, _ string) bool {
 	output := LLMOutput{
 		Warnings: r.Warnings,
 		Metadata: LLMMetadata{

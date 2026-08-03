@@ -30,9 +30,9 @@ type ChatCompletionResponse struct {
 	} `json:"choices"`
 }
 
-func NewLLMClient(apiUrl, apiKey, model string) *LLMClient {
+func NewLLMClient(apiURL, apiKey, model string) *LLMClient {
 	return &LLMClient{
-		APIUrl: apiUrl,
+		APIUrl: apiURL,
 		APIKey: apiKey,
 		Model:  model,
 	}

@@ -35,10 +35,10 @@ As an AI agent, you **must** read, understand, and strictly adhere to the standa
 
 ## 🧪 Testing Strategy
 
-- **Go Test Suite**: Unit, visitor, and integration tests can be run using `make test` or `go test ./...`.
+- **Go Test Suite**: Unit, visitor, and integration tests can be run using `make test` or `go test ./...` (or `make docker-test` inside Docker).
 - **PHP Fixtures**: Static code fixtures used in integration and visitor tests are located in `test/fixtures/`.
-- **Formatting & Linting**: Run `make lint` to execute `golangci-lint` over Go files.
-- **Full local CI loop**: `make ci` executes `build`, `test`, and `lint` in sequence.
+- **Formatting & Linting**: Run `make lint` to execute `golangci-lint` (or `make docker-lint` inside Docker).
+- **Full local CI loop**: `make ci` (or `make docker-ci` inside Docker) executes `build`, `test`, and `lint` in sequence.
 
 ---
 
@@ -55,4 +55,4 @@ As an AI agent, you **must** read, understand, and strictly adhere to the standa
 - Its `composer.json` should only require `"php": ">=8.1"`. Never add third-party PHP packages to `require`.
 
 ### 3. Local Verification
-- Always execute `make ci` before suggesting or committing changes to ensure formatting, linting, and Go/PHP integration tests pass flawlessly.
+- Always execute `make ci` or `make docker-ci` before suggesting or committing changes to ensure formatting, linting, and Go/PHP integration tests pass flawlessly.
