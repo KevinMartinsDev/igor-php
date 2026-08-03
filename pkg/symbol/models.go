@@ -79,8 +79,12 @@ type AuditStatus struct {
 
 // IsVendor returns true if the file is part of the vendor directory.
 func (a AuditStatus) IsVendor(projectRoot string) bool {
-	relPath := a.FilePath
-	if rel, found := strings.CutPrefix(a.FilePath, projectRoot); found && rel != "" {
+	// Normalize paths to forward slashes to make comparisons platform-independent
+	filePath := filepath.ToSlash(a.FilePath)
+	rootPath := filepath.ToSlash(projectRoot)
+
+	relPath := filePath
+	if rel, found := strings.CutPrefix(filePath, rootPath); found && rel != "" {
 		relPath = strings.TrimPrefix(rel, "/")
 	}
 
@@ -88,6 +92,13 @@ func (a AuditStatus) IsVendor(projectRoot string) bool {
 		return true
 	}
 
-	absPath, _ := filepath.Abs(a.FilePath)
-	return strings.Contains(absPath, "/vendor/")
+	absPath, err := filepath.Abs(a.FilePath)
+	if err == nil {
+		absPathSlash := filepath.ToSlash(absPath)
+		if strings.Contains(absPathSlash, "/vendor/") {
+			return true
+		}
+	}
+
+	return false
 }
