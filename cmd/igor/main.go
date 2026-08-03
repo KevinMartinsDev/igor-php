@@ -342,26 +342,26 @@ func handleGeminiReview(content string, cfg config.Config) {
 }
 
 func handleAPIReview(content string, cfg config.Config) {
-	apiUrl := cfg.LLMConfig.APIUrl
+	apiURL := cfg.LLMConfig.APIUrl
 	apiKey := ""
 	modeName := "Expert Mode"
 
 	if cfg.LLMConfig.Provider == "ollama" {
 		modeName = "Ollama Mode"
-		if apiUrl == "" {
-			apiUrl = "http://localhost:11434/v1"
+		if apiURL == "" {
+			apiURL = "http://localhost:11434/v1"
 		}
 		apiKey = "ollama"
 	} else {
-		apiKey = os.Getenv(cfg.LLMConfig.ApiKeyEnv)
+		apiKey = os.Getenv(cfg.LLMConfig.APIKeyEnv)
 		if apiKey == "" {
-			fmt.Fprintf(os.Stderr, "⚠️  Expert Mode enabled but ENV %s is empty. Falling back to Frictionless Mode.\n", cfg.LLMConfig.ApiKeyEnv)
+			fmt.Fprintf(os.Stderr, "⚠️  Expert Mode enabled but ENV %s is empty. Falling back to Frictionless Mode.\n", cfg.LLMConfig.APIKeyEnv)
 			return
 		}
 	}
 
 	fmt.Fprintf(os.Stderr, "🧠 %s: Sending audit to LLM (%s)...\n", modeName, cfg.LLMConfig.Model)
-	client := reporter.NewLLMClient(apiUrl, apiKey, cfg.LLMConfig.Model)
+	client := reporter.NewLLMClient(apiURL, apiKey, cfg.LLMConfig.Model)
 
 	prompt := fmt.Sprintf(reporter.FrictionlessPromptTemplate, content)
 	review, err := client.Review(prompt)
@@ -504,7 +504,7 @@ func shouldSkipServiceMeta(id string, def symbol.SymfonyService, aud *auditor.Au
 	return false, ""
 }
 
-func shouldSkipServicePath(id string, path string, cfg config.Config, aud *auditor.Auditor, rootPath string) (bool, string) {
+func shouldSkipServicePath(_ string, path string, cfg config.Config, aud *auditor.Auditor, rootPath string) (bool, string) {
 	if cfg.IsExcluded(path, rootPath) {
 		return true, fmt.Sprintf("path %s is excluded", path)
 	}

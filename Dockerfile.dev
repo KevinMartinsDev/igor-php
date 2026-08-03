@@ -1,0 +1,33 @@
+# Development Dockerfile for igor-php
+# This image includes Go, PHP, Composer, and golangci-lint
+# to provide a fully containerized environment for tests and linters.
+
+FROM golang:1.26-alpine
+
+# Install build dependencies, PHP, Composer, git, and bash
+# Note: build-base is required because tree-sitter uses CGO
+RUN apk add --no-cache \
+    build-base \
+    git \
+    bash \
+    make \
+    curl \
+    php83 \
+    php83-cli \
+    php83-mbstring \
+    php83-xml \
+    php83-phar \
+    php83-openssl \
+    php83-dom \
+    php83-tokenizer \
+    php83-xmlwriter \
+    php83-simplexml \
+    composer
+
+# Ensure 'php' executable points to php83
+RUN ln -sf /usr/bin/php83 /usr/bin/php
+
+# Install golangci-lint by compiling from source with the container's Go version
+RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
+
+WORKDIR /app

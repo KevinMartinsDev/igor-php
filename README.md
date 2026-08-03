@@ -487,5 +487,11 @@ jobs:
 
 ---
 
+## 🤝 Contributing
+
+We welcome contributions of all kinds! Please refer to our **[CONTRIBUTING.md](./CONTRIBUTING.md)** guide for instructions on how to set up the project, run tests, and validate your changes using either **native tools** or **Docker**.
+
+---
+
 ## 📄 License
 MIT

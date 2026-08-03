@@ -35,7 +35,7 @@ func TestReviewCommand_InvalidFile(t *testing.T) {
 
 func TestReviewCommand_ExpertMode(t *testing.T) {
 	// 1. Mock HTTP server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		resp := reporter.ChatCompletionResponse{
 			Choices: []struct {
 				Message reporter.Message `json:"message"`

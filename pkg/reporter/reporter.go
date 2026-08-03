@@ -34,17 +34,17 @@ func NewJSONReporter() Reporter {
 	}
 }
 
-func (r *JSONReporter) PrintHeader(count int) {}
+func (r *JSONReporter) PrintHeader(_ int) {}
 func (r *JSONReporter) PrintProjectHeader()  {}
 func (r *JSONReporter) PrintVendorHeader()   {}
 
-func (r *JSONReporter) PrintFindings(res symbol.AuditStatus, projectRoot string, isVendor bool) {
+func (r *JSONReporter) PrintFindings(res symbol.AuditStatus, _ string, _ bool) {
 	if len(res.Findings) > 0 {
 		r.Findings = append(r.Findings, res)
 	}
 }
 
-func (r *JSONReporter) PrintSummary(results []symbol.AuditStatus, projectRoot string) bool {
+func (r *JSONReporter) PrintSummary(_ []symbol.AuditStatus, _ string) bool {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")

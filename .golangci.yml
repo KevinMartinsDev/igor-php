@@ -1,8 +1,10 @@
-version: "2"
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.v1.64.jsonschema.json
+
 run:
   modules-download-mode: readonly
+
 linters:
-  default: none
+  disable-all: true
   enable:
     - errcheck
     - gocritic
@@ -14,26 +16,19 @@ linters:
     - revive
     - staticcheck
     - unused
-  settings:
-    gocyclo:
-      min-complexity: 20
-    revive:
-      rules:
-        - name: exported
-          disabled: true
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+
+linters-settings:
+  gocyclo:
+    min-complexity: 20
+  revive:
+    rules:
+      - name: exported
+        disabled: true
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-formatters:
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+  exclude-dirs:
+    - third_party
+    - builtin
+    - examples

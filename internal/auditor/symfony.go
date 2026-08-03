@@ -186,8 +186,8 @@ func (b *SymfonyBridge) locateFilesViaReflection(jsonPart string) error {
 		return nil
 	}
 
-	cleanJson := strOutput[start : end+1]
-	if err := json.Unmarshal([]byte(cleanJson), &b.ClassToFile); err != nil {
+	cleanJSON := strOutput[start : end+1]
+	if err := json.Unmarshal([]byte(cleanJSON), &b.ClassToFile); err != nil {
 		return fmt.Errorf("failed to parse reflection mapping: %v", err)
 	}
 

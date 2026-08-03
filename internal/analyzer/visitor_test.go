@@ -17,11 +17,11 @@ func (m *mockEngine) RecordClassAudited(name string) {
 	m.auditedClasses = append(m.auditedClasses, name)
 }
 
-func (m *mockEngine) IsExplicitlyNonShared(className string) bool {
+func (m *mockEngine) IsExplicitlyNonShared(_ string) bool {
 	return false
 }
 
-func (m *mockEngine) IsSafeNamespace(className string) bool {
+func (m *mockEngine) IsSafeNamespace(_ string) bool {
 	return false
 }
 

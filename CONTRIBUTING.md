@@ -30,9 +30,16 @@ Before opening a new issue, please search the existing issues to see if it has a
 Igor PHP is a hybrid tool: the static analysis engine is written in **Go**, and the Symfony configuration discovery/deep auditing is written in **PHP**.
 
 ### Prerequisites
+
+You can develop and run tests either **natively** on your machine or inside **Docker** (recommended if you do not want to install Go or PHP locally).
+
+#### Option A: Native Development (Best IDE support)
 - **Go**: 1.18 or higher.
 - **PHP**: 8.1 or higher (required for deep audit and reflection).
 - **Composer**: To manage PHP dependencies.
+
+#### Option B: Docker-based Development (Zero local dependencies)
+- **Docker**: Installed and running.
 
 ### Local Setup
 1. Fork the repository on GitHub and clone it locally:
@@ -41,7 +48,7 @@ Igor PHP is a hybrid tool: the static analysis engine is written in **Go**, and 
    cd igor-php
    ```
 
-*Note: The PHP bundle has no third-party vendor dependencies, so no `composer install` is necessary to develop or run the tool!*
+*Note: The PHP bundle has no third-party vendor dependencies, so no `composer install` is necessary to develop or run the tool natively!*
 
 ---
 
@@ -89,6 +96,35 @@ Before committing or pushing, run the entire local CI suite to ensure everything
 make ci
 ```
 This command runs `build`, `test`, and `lint` in sequence.
+
+---
+
+### Docker Alternative (Zero Local Dependencies)
+
+If you choose **Option B (Docker)** during setup, you can build, test, and lint the codebase without having Go, PHP, or any other compilation tools installed on your host system:
+
+* **Build the Docker Dev Image:**
+  ```bash
+  make docker-build
+  ```
+* **Run Tests inside Docker:**
+  ```bash
+  make docker-test
+  ```
+* **Run the Go Linter inside Docker:**
+  ```bash
+  make docker-lint
+  ```
+* **Run full CI validation inside Docker:**
+  ```bash
+  make docker-ci
+  ```
+* **Run the linter binary on a target path inside Docker:**
+  ```bash
+  make docker-run path=test/fixtures
+  ```
+
+*Note: The Docker environment mounts caching volumes (`igor-go-cache`, `igor-go-mod`, `igor-golangci-cache`) under the hood so subsequent container runs are extremely fast.*
 
 ---
 

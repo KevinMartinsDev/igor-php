@@ -23,7 +23,7 @@ type Config struct {
 type LLMConfig struct {
         Provider  string `json:"provider"` // "openai" (default), "gemini", or "ollama"
         APIUrl    string `json:"api_url"`
-        ApiKeyEnv string `json:"api_key_env"`
+        APIKeyEnv string `json:"api_key_env"`
         Model     string `json:"model"`
 }
 // Baseline represents a collection of ignored findings.
