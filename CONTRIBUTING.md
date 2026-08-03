@@ -55,6 +55,7 @@ Understanding where everything lives will help you make targeted changes:
 - `pkg/reporter/`: Formatter for reports (console, JSON, LLM-friendly review).
 - `src/php/`: The Symfony Bundle (`IgorPhpBundle`) that compiles container definitions.
 - `test/fixtures/`: PHP code fixtures used in integration and visitor tests.
+- `examples/demo-leak/`: The "Igor Leak Lab", a Docker-based Symfony playground used to demonstrate state pollution and memory leaks in FrankenPHP.
 
 ---
 
@@ -118,7 +119,9 @@ fix(reporter): handle empty lines in CLI output formatting
    ```bash
    git checkout -b feat/my-awesome-feature
    ```
-2. Implement your changes and add corresponding tests (e.g. adding a new PHP fixture under `test/fixtures/` and updating the visitor or integration tests).
+2. Implement your changes and add corresponding tests:
+   - Add a new PHP fixture under `test/fixtures/` and update the visitor or integration tests.
+   - **If you are adding a new analysis rule**, ideally update our "Igor Leak Lab" laboratory under `examples/demo-leak/` (including services, the controller, and instructions) to demonstrate the issue in action.
 3. Run `make ci` and fix any test failures or linter warnings.
 4. Push your branch to your fork:
    ```bash
