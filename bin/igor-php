@@ -1,98 +1,174 @@
 #!/usr/bin/env php
 <?php
 
-$repo = 'igor-php/igor-php';
-$binDir = __DIR__ . '/../resources/bin';
-$versionFile = $binDir . '/.version';
+$bootstrapper = new class()
+{
+    private const REPO = 'igor-php/igor-php';
+    private const BIN_DIR = __DIR__ . '/../resources/bin';
+    private const VERSION_ENV_VARIABLE_NAME = 'IGOR_VERSION';
+    private const AUTOLOAD_LOCATION_ENV_VARIABLE_NAME = 'IGOR_AUTOLOAD_LOCATION';
 
-// Get version from cache or fetch latest from GitHub
-if (file_exists($versionFile) && (time() - filemtime($versionFile) < 86400)) {
-    $version = trim(file_get_contents($versionFile));
-} else {
-    $opts = [
-        'http' => [
-            'method' => 'GET',
-            'header' => [
-                'User-Agent: Igor-PHP-Bootstrapper'
+    static public function run(array $args): int
+    {
+        $version = self::determineTargetVersion();
+        if ($version === null || $version === 'latest') {
+            $version = self::determineLatestVersion();
+        }
+
+        $os = strtolower(PHP_OS_FAMILY);
+        $arch = php_uname('m');
+
+        // Map architecture names
+        if ($arch === 'x86_64') {
+            $arch = 'amd64';
+        } elseif ($arch === 'arm64' || $arch === 'aarch64') {
+            $arch = 'arm64';
+        }
+
+        // OS Mapping for GoReleaser
+        if ($os === 'darwin') {
+            $os = 'darwin';
+        } elseif ($os === 'windows') {
+            $os = 'windows';
+        } else {
+            $os = 'linux';
+        }
+
+        $versionedBinaryPath = sprintf(
+            "%s/%s_%s_%s/",
+            self::BIN_DIR,
+            str_replace('.', '-', $version),
+            $os,
+            $arch,
+        );
+
+        $extension = ($os === 'windows') ? '.exe' : '';
+        $binaryName = $versionedBinaryPath . 'igor-php' . $extension;
+
+        if (!file_exists($binaryName)) {
+            self::downloadIgorBinary($version, $os, $arch, $versionedBinaryPath, $binaryName);
+        }
+
+        $cmd = escapeshellarg($binaryName) . ' ' . implode(' ', array_map(escapeshellarg(...), $args));
+        passthru($cmd, $exitCode);
+
+        return $exitCode;
+    }
+
+    private static function autoload(): void
+    {
+        $autoloadLocationOverride = getenv(self::AUTOLOAD_LOCATION_ENV_VARIABLE_NAME);
+        if ($autoloadLocationOverride !== false) {
+            require_once $autoloadLocationOverride;
+            return;
+        }
+
+        $potentialAutoloadLocations = [
+            dirname(__DIR__) . '/vendor/autoload.php', // for local development on Igor-php
+            dirname(__DIR__, 4) . '/vendor/autoload.php', // for Igor-php installed in other projects
+        ];
+
+        foreach ($potentialAutoloadLocations as $potentialAutoloadLocation) {
+            if (is_file($potentialAutoloadLocation)) {
+                require_once $potentialAutoloadLocation;
+                return;
+            }
+        }
+
+        die(
+            sprintf(
+                "❌ Igor couldn't find the autoloader.\n Specify autoloader location by setting the %s env variable.",
+                self::AUTOLOAD_LOCATION_ENV_VARIABLE_NAME
+            )
+        );
+    }
+
+    private static function determineTargetVersion(): ?string
+    {
+        $versionOverride = getenv(self::VERSION_ENV_VARIABLE_NAME);
+        if ($versionOverride !== false) {
+            return $versionOverride;
+        }
+
+        self::autoload();
+
+        $versionString = trim(\Composer\InstalledVersions::getPrettyVersion('igor-php/igor-php'));
+        if (preg_match('/^v?(\d+\.\d+\.\d+)$/', $versionString, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
+    private static function determineLatestVersion(): string
+    {
+        $opts = [
+            'http' => [
+                'method' => 'GET',
+                'header' => [
+                    'User-Agent: Igor-PHP-Bootstrapper'
+                ]
             ]
-        ]
-    ];
-    $context = stream_context_create($opts);
-    $response = @file_get_contents("https://api.github.com/repos/{$repo}/releases/latest", false, $context);
-    
-    if ($response) {
+        ];
+        $context = stream_context_create($opts);
+        $url = sprintf(
+            "https://api.github.com/repos/%s/releases/latest",
+            self::REPO
+        );
+        $response = @file_get_contents($url, false, $context);
+
+        if ($response === false) {
+            die(
+                sprintf(
+                    "❌ Igor couldn't reach the laboratory. URL: %s\nPlease check your internet connection or specify a Igor version by setting the %s env variable.\n",
+                    $url,
+                    self::VERSION_ENV_VARIABLE_NAME,
+                )
+            );
+        }
+
         $data = json_decode($response, true);
         $version = ltrim($data['tag_name'], 'v');
-        if (!is_dir($binDir)) {
-            mkdir($binDir, 0755, true);
+
+        return $version;
+    }
+
+    static private function downloadIgorBinary(string $version, string $os, string $arch, string $targetPath, string $fullBinaryName): void
+    {
+        if (!is_dir($targetPath)) {
+            mkdir($targetPath, 0755, true);
         }
-        file_put_contents($versionFile, $version);
-    } else {
-        // Fallback to a safe version if API fails
-        $version = file_exists($versionFile) ? trim(file_get_contents($versionFile)) : '0.1.4';
+
+        echo "🧟 Igor is waking up... Downloading binary for {$os}/{$arch} (v{$version})...\n";
+
+        // GoReleaser format: igor-php_0.1.0_linux_arm64.tar.gz
+        $archiveName = "igor-php_{$version}_{$os}_{$arch}";
+        $url = "https://github.com/igor-php/igor-php/releases/download/v{$version}/{$archiveName}.tar.gz";
+
+        if ($os === 'windows') {
+            $url = "https://github.com/igor-php/igor-php/releases/download/v{$version}/{$archiveName}.zip";
+        }
+
+        $content = @file_get_contents($url);
+        if ($content === false) {
+            die("❌ Igor couldn't reach the laboratory. URL: $url\nPlease check your internet connection or if the release v$version exists on GitHub.\n");
+        }
+
+        $tempFile = sys_get_temp_dir() . '/igor.tmp';
+        file_put_contents($tempFile, $content);
+
+        if ($os === 'windows') {
+            exec(sprintf("powershell Expand-Archive -Path %s -DestinationPath %s", $tempFile, $targetPath));
+        } else {
+            exec(sprintf("tar -xzf %s -C %s", $tempFile, $targetPath));
+        }
+
+        unlink($tempFile);
+
+        if (file_exists($fullBinaryName)) {
+            chmod($fullBinaryName, 0755);
+        }
     }
-}
+};
 
-$os = strtolower(PHP_OS_FAMILY);
-$arch = php_uname('m');
-
-// Map architecture names
-if ($arch === 'x86_64') {
-    $arch = 'amd64';
-} elseif ($arch === 'arm64' || $arch === 'aarch64') {
-    $arch = 'arm64';
-}
-
-// OS Mapping for GoReleaser
-if ($os === 'darwin') {
-    $os = 'darwin';
-} elseif ($os === 'windows') {
-    $os = 'windows';
-} else {
-    $os = 'linux';
-}
-
-$extension = ($os === 'windows') ? '.exe' : '';
-$binaryName = "igor-php";
-$localBinary = "{$binDir}/{$binaryName}{$extension}";
-
-if (!file_exists($localBinary)) {
-    if (!is_dir($binDir)) {
-        mkdir($binDir, 0755, true);
-    }
-
-    echo "🧟 Igor is waking up... Downloading binary for {$os}/{$arch} (v{$version})...\n";
-    
-    // GoReleaser format: igor-php_0.1.0_linux_arm64.tar.gz
-    $archiveName = "igor-php_{$version}_{$os}_{$arch}";
-    $url = "https://github.com/igor-php/igor-php/releases/download/v{$version}/{$archiveName}.tar.gz";
-    
-    if ($os === 'windows') {
-        $url = "https://github.com/igor-php/igor-php/releases/download/v{$version}/{$archiveName}.zip";
-    }
-
-    $content = @file_get_contents($url);
-    if ($content === false) {
-        die("❌ Igor couldn't reach the laboratory. URL: $url\nPlease check your internet connection or if the release v$version exists on GitHub.\n");
-    }
-
-    $tempFile = sys_get_temp_dir() . '/igor.tmp';
-    file_put_contents($tempFile, $content);
-
-    if ($os === 'windows') {
-        exec("powershell Expand-Archive -Path $tempFile -DestinationPath $binDir");
-    } else {
-        exec("tar -xzf $tempFile -C $binDir");
-    }
-    
-    unlink($tempFile);
-    if (file_exists($localBinary)) {
-        chmod($localBinary, 0755);
-    }
-}
-
-$args = array_slice($argv, 1);
-$cmd = escapeshellarg($localBinary) . ' ' . implode(' ', array_map('escapeshellarg', $args));
-
-passthru($cmd, $exitCode);
-exit($exitCode);
+exit($bootstrapper::run(array_slice($argv, 1)));
