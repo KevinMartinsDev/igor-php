@@ -629,9 +629,59 @@ class ValidationAndCacheService {
 	}
 }
 
+func TestPHPVisitor_InheritedPropertyReset(t *testing.T) {
+	code := `<?php
+abstract class AbstractAdapter implements Symfony\Contracts\Service\ResetInterface {
+    protected $sale;
+    public function reset() {
+        unset($this->sale);
+    }
+}
 
+class ConcreteAdapter implements Symfony\Contracts\Service\ResetInterface {
+    public function setSale($s) {
+        $this->sale = $s; // Mutation of an inherited property (not locally declared)
+    }
+}
 
+class ConcreteAdapterWithLocalProps implements Symfony\Contracts\Service\ResetInterface {
+    private $localProp; // Locally declared property
+    public function setLocalProp($val) {
+        $this->localProp = $val; // Mutation of local property
+    }
+    // Forgets to implement reset() or doesn't reset $localProp
+}`
+	content := []byte(code)
 
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
 
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
 
+	findings := v.Findings()
+	// Should only find the warning for 'localProp' in ConcreteAdapterWithLocalProps,
+	// and NOT for 'sale' in ConcreteAdapter or AbstractAdapter (since AbstractAdapter resets it).
+	foundLocalPropWarning := false
+	foundSaleWarning := false
 
+	for _, f := range findings {
+		if f.Message == fmt.Sprintf("Property 'sale' of ConcreteAdapter is mutated but not reset in reset().") {
+			foundSaleWarning = true
+		}
+		if f.Message == fmt.Sprintf("Property 'localProp' of ConcreteAdapterWithLocalProps is mutated but not reset in reset().") {
+			foundLocalPropWarning = true
+		}
+	}
+
+	if foundSaleWarning {
+		t.Error("Expected no warning for inherited property 'sale' in ConcreteAdapter")
+	}
+	if !foundLocalPropWarning {
+		t.Error("Expected a warning for local property 'localProp' in ConcreteAdapterWithLocalProps")
+	}
+}

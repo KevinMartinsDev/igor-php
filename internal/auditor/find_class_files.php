@@ -39,9 +39,41 @@ foreach ($classesToCheck as $class => $_) {
     try {
         if (class_exists($class) || interface_exists($class) || trait_exists($class)) {
             $reflection = new ReflectionClass($class);
-            $file = $reflection->getFileName();
-            if ($file && file_exists($file)) {
-                $mapping[$class] = $file;
+            
+            $hierarchy = [$reflection];
+            $current = $reflection;
+            while ($parent = $current->getParentClass()) {
+                $hierarchy[] = $parent;
+                $current = $parent;
+            }
+            
+            $getTraits = function(ReflectionClass $ref, array &$visited = []) use (&$getTraits) {
+                $traits = [];
+                foreach ($ref->getTraits() as $trait) {
+                    $name = $trait->getName();
+                    if (!isset($visited[$name])) {
+                        $visited[$name] = true;
+                        $traits[] = $trait;
+                        $traits = array_merge($traits, $getTraits($trait, $visited));
+                    }
+                }
+                return $traits;
+            };
+            
+            $traits = [];
+            foreach ($hierarchy as $h) {
+                $traits = array_merge($traits, $getTraits($h));
+            }
+            foreach ($traits as $trait) {
+                $hierarchy[] = $trait;
+            }
+            
+            foreach ($hierarchy as $item) {
+                $name = $item->getName();
+                $file = $item->getFileName();
+                if ($file && file_exists($file)) {
+                    $mapping[$name] = $file;
+                }
             }
         }
     } catch (Throwable $e) {}

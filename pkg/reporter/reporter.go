@@ -34,9 +34,9 @@ func NewJSONReporter() Reporter {
 	}
 }
 
-func (r *JSONReporter) PrintHeader(_ int) {}
-func (r *JSONReporter) PrintProjectHeader()  {}
-func (r *JSONReporter) PrintVendorHeader()   {}
+func (r *JSONReporter) PrintHeader(_ int)   {}
+func (r *JSONReporter) PrintProjectHeader() {}
+func (r *JSONReporter) PrintVendorHeader()  {}
 
 func (r *JSONReporter) PrintFindings(res symbol.AuditStatus, _ string, _ bool) {
 	if len(res.Findings) > 0 {

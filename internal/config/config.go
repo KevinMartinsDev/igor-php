@@ -58,16 +58,17 @@ func LoadConfig(root string, customConfigPath string) Config {
 		c.IgnoreVendors = true
 	}
 	if userConfig.BaselinePath != "" {
-	        c.BaselinePath = userConfig.BaselinePath
+		c.BaselinePath = userConfig.BaselinePath
 	}
 	if userConfig.LLMConfig.Provider != "" || userConfig.LLMConfig.APIUrl != "" {
-	        c.LLMConfig = userConfig.LLMConfig
-	        if c.LLMConfig.Provider == "" {
-	                c.LLMConfig.Provider = "openai"
-	        }
+		c.LLMConfig = userConfig.LLMConfig
+		if c.LLMConfig.Provider == "" {
+			c.LLMConfig.Provider = "openai"
+		}
 	}
 	return c
-	}
+}
+
 // IsExcluded returns true if the given path matches any of the excluded patterns.
 func (c Config) IsExcluded(path string, rootPath string) bool {
 	rel, err := filepath.Rel(rootPath, path)

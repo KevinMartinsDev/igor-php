@@ -38,6 +38,7 @@ type PHPVisitor struct {
 	readonlyProps      map[string]bool
 	workerSafeProps    map[string]bool
 	propertyTypes      map[string]string
+	declaredProps      map[string]bool
 	finallyCleaned     map[string]bool
 	mutated            map[string]mutationInfo
 	resetted           map[string]bool
@@ -57,6 +58,7 @@ func NewVisitor(content []byte, engine Engine) *PHPVisitor {
 		readonlyProps:   make(map[string]bool),
 		workerSafeProps: make(map[string]bool),
 		propertyTypes:   make(map[string]string),
+		declaredProps:   make(map[string]bool),
 		finallyCleaned:  make(map[string]bool),
 		localSharedVars: make(map[string]bool),
 		engine:          engine,
@@ -88,7 +90,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 	}
 	nodeType := n.Kind()
 
-	oldClass, oldMethod, oldIsRes, oldIsReadonly, oldReadonlyProps, oldIsWorkerSafeClass, oldIsWorkerSafeMethod, oldFinallyCleaned := v.curClass, v.curMethod, v.isReset, v.isReadonlyClass, v.readonlyProps, v.isWorkerSafeClass, v.isWorkerSafeMethod, v.finallyCleaned
+	oldClass, oldMethod, oldIsRes, oldIsReadonly, oldReadonlyProps, oldDeclaredProps, oldIsWorkerSafeClass, oldIsWorkerSafeMethod, oldFinallyCleaned := v.curClass, v.curMethod, v.isReset, v.isReadonlyClass, v.readonlyProps, v.declaredProps, v.isWorkerSafeClass, v.isWorkerSafeMethod, v.finallyCleaned
 
 	switch nodeType {
 	case "namespace_definition":
@@ -130,7 +132,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		if v.isReset {
 			v.performResetCheck()
 		}
-		v.curClass, v.isReset, v.isReadonlyClass, v.readonlyProps, v.isWorkerSafeClass = oldClass, oldIsRes, oldIsReadonly, oldReadonlyProps, oldIsWorkerSafeClass
+		v.curClass, v.isReset, v.isReadonlyClass, v.readonlyProps, v.declaredProps, v.isWorkerSafeClass = oldClass, oldIsRes, oldIsReadonly, oldReadonlyProps, oldDeclaredProps, oldIsWorkerSafeClass
 	case "method_declaration", "function_definition":
 		v.curMethod, v.isWorkerSafeMethod, v.finallyCleaned = oldMethod, oldIsWorkerSafeMethod, oldFinallyCleaned
 	}
@@ -178,6 +180,7 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 	v.readonlyProps = make(map[string]bool)
 	v.workerSafeProps = make(map[string]bool)
 	v.propertyTypes = make(map[string]string)
+	v.declaredProps = make(map[string]bool)
 	v.isWorkerSafeClass = v.hasAttribute(n, "WorkerSafe")
 
 	v.scanReadonlyProps(n)
@@ -496,6 +499,13 @@ func (v *PHPVisitor) logMutation(n *sitter.Node, prop string, static bool) {
 func (v *PHPVisitor) performResetCheck() {
 	for prop, info := range v.mutated {
 		if v.workerSafeProps[prop] {
+			continue
+		}
+		propName := prop
+		if strings.HasPrefix(prop, "static::") {
+			propName = strings.TrimPrefix(prop, "static::")
+		}
+		if !v.declaredProps[propName] {
 			continue
 		}
 		if !v.resetted[prop] {
@@ -844,6 +854,7 @@ func (v *PHPVisitor) scanPropertyTypes(classNode *sitter.Node) {
 						if typeStr != "" {
 							v.propertyTypes[propName] = typeStr
 						}
+						v.declaredProps[propName] = true
 					}
 				}
 			}
@@ -857,15 +868,21 @@ func (v *PHPVisitor) scanPropertyTypes(classNode *sitter.Node) {
 						param := params.Child(j)
 						if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" {
 							typeNode := param.ChildByFieldName("type")
+							var typeStr string
 							if typeNode != nil {
-								typeStr := v.getContent(typeNode)
-								for k := uint(0); k < param.ChildCount(); k++ {
-									child := param.Child(k)
-									if child.Kind() == "variable_name" {
-										propName := strings.TrimPrefix(v.getContent(child), "$")
+								typeStr = v.getContent(typeNode)
+							}
+							for k := uint(0); k < param.ChildCount(); k++ {
+								child := param.Child(k)
+								if child.Kind() == "variable_name" {
+									propName := strings.TrimPrefix(v.getContent(child), "$")
+									if typeStr != "" {
 										v.propertyTypes[propName] = typeStr
-										break
 									}
+									if param.Kind() == "property_promotion_parameter" {
+										v.declaredProps[propName] = true
+									}
+									break
 								}
 							}
 						}
