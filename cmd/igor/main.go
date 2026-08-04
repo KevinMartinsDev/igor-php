@@ -89,22 +89,99 @@ func detectSymfonyProject(rootPath string, cfg config.Config) *auditor.SymfonyBr
 }
 
 func loadAuditBaseline(rootPath string, cfg config.Config) config.Baseline {
-	if cfg.BaselinePath == "" || cfg.GenerateBaseline {
+	if cfg.GenerateBaseline {
 		return config.Baseline{}
 	}
 
-	baselineFile := cfg.BaselinePath
-	if !filepath.IsAbs(baselineFile) {
-		baselineFile = filepath.Join(rootPath, baselineFile)
+	var baseline config.Baseline
+	baseline.Files = make(map[string][]config.BaselineEntry)
+
+	if cfg.BaselinePath != "" {
+		baselineFile := cfg.BaselinePath
+		if !filepath.IsAbs(baselineFile) {
+			baselineFile = filepath.Join(rootPath, baselineFile)
+		}
+
+		loaded, err := config.LoadBaseline(baselineFile)
+		if err == nil {
+			baseline = loaded
+			fmt.Fprintf(os.Stderr, "🛡️  Baseline loaded: %d files will be partially ignored.\n", len(baseline.Files))
+		} else {
+			fmt.Fprintf(os.Stderr, "⚠️  Warning: Could not load baseline from %s: %v\n", baselineFile, err)
+		}
 	}
 
-	baseline, err := config.LoadBaseline(baselineFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️  Warning: Could not load baseline from %s: %v\n", baselineFile, err)
-		return config.Baseline{}
+	if !cfg.IgnoreExternalBaseline {
+		vendorDir := filepath.Join(rootPath, "vendor")
+		vendors, err := os.ReadDir(vendorDir)
+		if err == nil {
+			externalCount := 0
+			for _, vDir := range vendors {
+				if !vDir.IsDir() {
+					continue
+				}
+				vName := vDir.Name()
+				if vName == "bin" || vName == "composer" || strings.HasPrefix(vName, ".") {
+					continue
+				}
+
+				packagesDir := filepath.Join(vendorDir, vName)
+				pkgs, err := os.ReadDir(packagesDir)
+				if err != nil {
+					continue
+				}
+				for _, pDir := range pkgs {
+					if !pDir.IsDir() {
+						continue
+					}
+					pName := pDir.Name()
+					packagePath := filepath.Join(packagesDir, pName)
+
+					configPath := filepath.Join(packagePath, "igor.json")
+					var baselinePath string
+
+					if _, err := os.Stat(configPath); err == nil {
+						pkgCfg := config.LoadConfig(packagePath, configPath)
+						if pkgCfg.BaselinePath != "" {
+							baselinePath = pkgCfg.BaselinePath
+							if !filepath.IsAbs(baselinePath) {
+								baselinePath = filepath.Join(packagePath, baselinePath)
+							}
+						}
+					}
+
+					if baselinePath == "" {
+						defaultBaseline := filepath.Join(packagePath, "igor-baseline.json")
+						if _, err := os.Stat(defaultBaseline); err == nil {
+							baselinePath = defaultBaseline
+						}
+					}
+
+					if baselinePath != "" {
+						externalBaseline, err := config.LoadBaseline(baselinePath)
+						if err == nil {
+							if baseline.Files == nil {
+								baseline.Files = make(map[string][]config.BaselineEntry)
+							}
+							for relVendorPath, entries := range externalBaseline.Files {
+								parentRelPath := filepath.Join("vendor", vName, pName, relVendorPath)
+								baseline.Files[parentRelPath] = entries
+								externalCount++
+							}
+						} else {
+							if cfg.Verbose {
+								fmt.Fprintf(os.Stderr, "⚠️  Warning: Could not load external baseline from %s: %v\n", baselinePath, err)
+							}
+						}
+					}
+				}
+			}
+			if externalCount > 0 {
+				fmt.Fprintf(os.Stderr, "🛡️  Loaded %d external baseline paths from vendor dependencies.\n", externalCount)
+			}
+		}
 	}
 
-	fmt.Fprintf(os.Stderr, "🛡️  Baseline loaded: %d files will be partially ignored.\n", len(baseline.Files))
 	return baseline
 }
 
@@ -191,6 +268,7 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 	noAgentFlag := flag.Bool("no-agent", false, "Disable Igor Agent and fallback to standard scan")
 	outputFlag := flag.String("output", "cli", "Output format (cli, llm, json)")
 	containerDumpFlag := flag.String("container-dump", "", "Path to a generic container dump JSON ({\"services\":[{\"class\":...,\"shared\":bool}]}) used to skip transient (non-shared) classes")
+	ignoreExternalBaselineFlag := flag.Bool("ignore-external-baseline", false, "Ignore baseline files defined in external vendor packages")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "🧟 Igor-PHP v%s - The faithful assistant for FrankenPHP Workers\n\n", Version)
@@ -237,7 +315,7 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 	rootPath, _ := filepath.Abs(args[0])
 
 	cfg := config.LoadConfig(rootPath, configPath)
-	applyFlagOverrides(&cfg, consoleFlag, envFlag, verboseFlag, noAgentFlag, outputFlag, generateBaselineFlag, baselineFlag, containerDumpFlag)
+	applyFlagOverrides(&cfg, consoleFlag, envFlag, verboseFlag, noAgentFlag, outputFlag, generateBaselineFlag, baselineFlag, containerDumpFlag, ignoreExternalBaselineFlag)
 
 	// Display summary of packages
 	if len(cfg.ProdPackages) > 0 || len(cfg.DevPackages) > 0 {
@@ -380,7 +458,7 @@ func handleAPIReview(content string, cfg config.Config) {
 	os.Exit(0)
 }
 
-func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verboseFlag, noAgentFlag *bool, outputFlag *string, generateBaselineFlag *bool, baselineFlag, containerDumpFlag *string) {
+func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verboseFlag, noAgentFlag *bool, outputFlag *string, generateBaselineFlag *bool, baselineFlag, containerDumpFlag *string, ignoreExternalBaselineFlag *bool) {
 	if *consoleFlag != "" {
 		cfg.ConsolePath = *consoleFlag
 	}
@@ -398,6 +476,9 @@ func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verbos
 	}
 	if *outputFlag != "" {
 		cfg.OutputFormat = *outputFlag
+	}
+	if *ignoreExternalBaselineFlag {
+		cfg.IgnoreExternalBaseline = true
 	}
 	if *generateBaselineFlag {
 		cfg.GenerateBaseline = true

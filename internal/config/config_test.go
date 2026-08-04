@@ -102,6 +102,18 @@ func TestLoadConfig(t *testing.T) {
 			t.Errorf("Expected Model, got %s", cfg.LLMConfig.Model)
 		}
 	})
+
+	t.Run("Ignore External Baseline configuration", func(t *testing.T) {
+		content := `{"ignore_external_baseline": true}`
+		err := os.WriteFile(filepath.Join(tmpDir, "igor.json"), []byte(content), 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := LoadConfig(tmpDir, "")
+		if !cfg.IgnoreExternalBaseline {
+			t.Errorf("Expected IgnoreExternalBaseline to be true, got false")
+		}
+	})
 }
 func TestInitConfig(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "igor_init_test")
