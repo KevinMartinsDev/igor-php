@@ -83,6 +83,12 @@ func TestAuditFixtures(t *testing.T) {
 			expectedErrors: 3,
 			contains:       "Mutation of state",
 		},
+		{
+			name:           "Inheritance reset check bypasses inherited properties",
+			fixture:        "inheritance_reset_test.php",
+			expectedErrors: 1,
+			contains:       "Property 'localProp' of ConcreteChildAdapterWithLocalLeak is mutated but not reset",
+		},
 	}
 
 	for _, tt := range tests {

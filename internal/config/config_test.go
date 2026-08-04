@@ -75,11 +75,11 @@ func TestLoadConfig(t *testing.T) {
 		}
 		cfg := LoadConfig(tmpDir, customPath)
 		if len(cfg.Exclude) != 1 || cfg.Exclude[0] != "custom-path" {
-		        t.Errorf("Expected 'custom-path' exclude, got %v", cfg.Exclude)
+			t.Errorf("Expected 'custom-path' exclude, got %v", cfg.Exclude)
 		}
-		})
+	})
 
-		t.Run("LLM configuration", func(t *testing.T) {
+	t.Run("LLM configuration", func(t *testing.T) {
 		content := `{
 		        "llm": {
 		                "api_url": "https://api.openai.com/v1",
@@ -89,20 +89,20 @@ func TestLoadConfig(t *testing.T) {
 		}`
 		err := os.WriteFile(filepath.Join(tmpDir, "igor.json"), []byte(content), 0644)
 		if err != nil {
-		        t.Fatal(err)
+			t.Fatal(err)
 		}
 		cfg := LoadConfig(tmpDir, "")
 		if cfg.LLMConfig.APIUrl != "https://api.openai.com/v1" {
-		        t.Errorf("Expected API URL, got %s", cfg.LLMConfig.APIUrl)
+			t.Errorf("Expected API URL, got %s", cfg.LLMConfig.APIUrl)
 		}
 		if cfg.LLMConfig.APIKeyEnv != "OPENAI_API_KEY" {
-		        t.Errorf("Expected API Key Env, got %s", cfg.LLMConfig.APIKeyEnv)
+			t.Errorf("Expected API Key Env, got %s", cfg.LLMConfig.APIKeyEnv)
 		}
 		if cfg.LLMConfig.Model != "gpt-4o" {
-		        t.Errorf("Expected Model, got %s", cfg.LLMConfig.Model)
+			t.Errorf("Expected Model, got %s", cfg.LLMConfig.Model)
 		}
-		})
-		}
+	})
+}
 func TestInitConfig(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "igor_init_test")
 	if err != nil {
@@ -155,4 +155,3 @@ func TestInitConfig(t *testing.T) {
 		}
 	})
 }
-

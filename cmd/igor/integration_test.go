@@ -127,7 +127,7 @@ spl_autoload_register(function ($class) {
     }
 });
 `
-			_ = os.WriteFile(filepath.Join(tmpDir, "vendor", "autoload.php"), []byte(originalAutoloader), 0644);
+			_ = os.WriteFile(filepath.Join(tmpDir, "vendor", "autoload.php"), []byte(originalAutoloader), 0644)
 		}()
 
 		bridge := auditor.NewSymfonyBridge(tmpDir, "bin/console", config.Config{NoAgent: true})

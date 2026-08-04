@@ -1,19 +1,19 @@
 package main
 
 import (
-        "bytes"
-        "flag"
-        "fmt"
-        "os"
-        "os/exec"
-        "path/filepath"
-        "strings"
-        "sync"
+	"bytes"
+	"flag"
+	"fmt"
 	"github.com/igor-php/igor-php/internal/analyzer"
 	"github.com/igor-php/igor-php/internal/auditor"
 	"github.com/igor-php/igor-php/internal/config"
 	"github.com/igor-php/igor-php/pkg/reporter"
 	"github.com/igor-php/igor-php/pkg/symbol"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
 )
 
 var Version = "dev"
@@ -446,8 +446,25 @@ func collectFiles(rootPath string, cfg config.Config, aud *auditor.Auditor) []sy
 	// Guard the Container too: a non-nil bridge can still carry a nil Container if
 	// LoadContainer failed, and collectSymfonyServices iterates Container.Definitions.
 	if aud.Symfony != nil && aud.Symfony.Container != nil {
-	        fmt.Fprintln(os.Stderr, "🎯 Symfony detected: Mapping services and dependencies...")
-	        auditList = append(auditList, collectSymfonyServices(rootPath, cfg, aud, processedFiles)...)
+		fmt.Fprintln(os.Stderr, "🎯 Symfony detected: Mapping services and dependencies...")
+		auditList = append(auditList, collectSymfonyServices(rootPath, cfg, aud, processedFiles)...)
+
+		// Also collect parent classes and traits resolved by reflection that are not yet processed
+		for class, path := range aud.Symfony.ClassToFile {
+			if processedFiles[path] {
+				continue
+			}
+			if skip, _ := shouldSkipServicePath("", path, cfg, aud, rootPath); skip {
+				continue
+			}
+			auditList = append(auditList, symbol.AuditStatus{
+				ServiceID: "Inherited/" + class,
+				FilePath:  path,
+				Status:    "⏳ PENDING",
+				IsShared:  true,
+			})
+			processedFiles[path] = true
+		}
 	}
 
 	// --- STEP 2: Scan remaining local project files ---
@@ -459,8 +476,8 @@ func collectFiles(rootPath string, cfg config.Config, aud *auditor.Auditor) []sy
 
 	// --- STEP 3: Forced Vendor Scan ---
 	if len(cfg.ScanVendors) > 0 {
-	        fmt.Fprintln(os.Stderr, "🔍 Forced Vendor Scan: Auditing specific vendor paths...")
-	        auditList = append(auditList, collectForcedVendorFiles(rootPath, cfg, processedFiles)...)
+		fmt.Fprintln(os.Stderr, "🔍 Forced Vendor Scan: Auditing specific vendor paths...")
+		auditList = append(auditList, collectForcedVendorFiles(rootPath, cfg, processedFiles)...)
 	}
 	return auditList
 }

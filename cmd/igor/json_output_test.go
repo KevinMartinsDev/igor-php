@@ -37,7 +37,9 @@ func TestCLI_JSONOutput(t *testing.T) {
 	t.Run("setupReporter should return JSONReporter for json format", func(t *testing.T) {
 		cfg := config.Config{OutputFormat: "json"}
 		rep := setupReporter(cfg)
-		if _, ok := rep.(interface{ PrintFindings(symbol.AuditStatus, string, bool) }); !ok {
+		if _, ok := rep.(interface {
+			PrintFindings(symbol.AuditStatus, string, bool)
+		}); !ok {
 			t.Fatal("setupReporter did not return a valid Reporter")
 		}
 		// We can't easily check the private type name across packages if not exported,

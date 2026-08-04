@@ -9,9 +9,9 @@ import (
 )
 
 type LLMClient struct {
-	APIUrl    string
-	APIKey    string
-	Model     string
+	APIUrl string
+	APIKey string
+	Model  string
 }
 
 type ChatCompletionRequest struct {
