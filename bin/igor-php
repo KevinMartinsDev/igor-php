@@ -5,6 +5,7 @@ $bootstrapper = new class()
 {
     private const REPO = 'igor-php/igor-php';
     private const BIN_DIR = __DIR__ . '/../resources/bin';
+    private const VERSION_CACHE_FILE = self::BIN_DIR . '/.latest-version';
     private const VERSION_ENV_VARIABLE_NAME = 'IGOR_VERSION';
     private const AUTOLOAD_LOCATION_ENV_VARIABLE_NAME = 'IGOR_AUTOLOAD_LOCATION';
 
@@ -12,13 +13,13 @@ $bootstrapper = new class()
     {
         $version = self::determineTargetVersion();
         if ($version === null || $version === 'latest') {
-            echo 'ℹ️ Falling back to latest version.';
+            echo 'ℹ️  Falling back to latest version.' . PHP_EOL;
             $version = self::determineLatestVersion();
         }
 
         // Enforce safe alphanumeric characters for the version string
         if (!preg_match('/^[a-zA-Z0-9.\-_]+$/', $version)) {
-            die("❌ Invalid version format specified.\n");
+            die("❌ Invalid version format specified." . PHP_EOL);
         }
 
         $os = strtolower(PHP_OS_FAMILY);
@@ -65,6 +66,10 @@ $bootstrapper = new class()
     {
         $autoloadLocationOverride = getenv(self::AUTOLOAD_LOCATION_ENV_VARIABLE_NAME);
         if ($autoloadLocationOverride !== false) {
+            if (!is_file($autoloadLocationOverride) || !is_readable($autoloadLocationOverride)) {
+                die('❌ Igor could not find autoload location override: ' . $autoloadLocationOverride . PHP_EOL);
+            }
+
             require_once $autoloadLocationOverride;
             return true;
         }
@@ -81,10 +86,7 @@ $bootstrapper = new class()
             }
         }
 
-        echo sprintf(
-            "❌ Igor couldn't find the autoloader.\n Specify autoloader location by setting the %s env variable.",
-            self::AUTOLOAD_LOCATION_ENV_VARIABLE_NAME
-        );
+        echo "ℹ️  Igor couldn't find an autoloader." . PHP_EOL;
 
         return false;
     }
@@ -107,8 +109,7 @@ $bootstrapper = new class()
             }
         } catch(Throwable $throwable) {
             // Fallback gracefully on local dev clones or non-composer setups
-            echo '⚠️ Error while determining current version:' . PHP_EOL
-                    . $throwable->getMessage();
+            echo 'ℹ️  Igor could not determine the current version:' . PHP_EOL;
         }
 
         return null;
@@ -116,6 +117,11 @@ $bootstrapper = new class()
 
     private static function determineLatestVersion(): string
     {
+        // 24-hour cache TTL to prevent hitting GitHub API rate-limits and adding execution latency
+        if (file_exists(self::VERSION_CACHE_FILE) && (time() - filemtime(self::VERSION_CACHE_FILE) < 86400)) {
+            return trim(file_get_contents(self::VERSION_CACHE_FILE));
+        }
+
         $opts = [
             'http' => [
                 'method' => 'GET',
@@ -134,8 +140,9 @@ $bootstrapper = new class()
         if ($response === false) {
             die(
                 sprintf(
-                    "❌ Igor couldn't reach the laboratory. URL: %s\nPlease check your internet connection or specify a Igor version by setting the %s env variable.\n",
+                    "❌ Igor couldn't reach the laboratory. URL: %s%sPlease check your internet connection or specify a Igor version by setting the %s env variable." . PHP_EOL,
                     $url,
+                    PHP_EOL,
                     self::VERSION_ENV_VARIABLE_NAME,
                 )
             );
@@ -143,6 +150,13 @@ $bootstrapper = new class()
 
         $data = json_decode($response, true);
         $version = ltrim($data['tag_name'], 'v');
+
+        $versionCacheDir = dirname(self::VERSION_CACHE_FILE);
+
+        if (!is_dir($versionCacheDir)) {
+            mkdir($versionCacheDir, 0755, true);
+        }
+        file_put_contents(self::VERSION_CACHE_FILE, $version);
 
         return $version;
     }
@@ -153,7 +167,7 @@ $bootstrapper = new class()
             mkdir($targetPath, 0755, true);
         }
 
-        echo "🧟 Igor is waking up... Downloading binary for {$os}/{$arch} (v{$version})...\n";
+        echo "🧟 Igor is waking up... Downloading binary for {$os}/{$arch} (v{$version})..." . PHP_EOL;
 
         // GoReleaser format: igor-php_0.1.0_linux_arm64.tar.gz
         $archiveName = "igor-php_{$version}_{$os}_{$arch}";
@@ -165,7 +179,10 @@ $bootstrapper = new class()
 
         $content = @file_get_contents($url);
         if ($content === false) {
-            die("❌ Igor couldn't reach the laboratory. URL: $url\nPlease check your internet connection or if the release v$version exists on GitHub.\n");
+            die(
+                "❌ Igor couldn't reach the laboratory. URL: $url" . PHP_EOL .
+                "Please check your internet connection or if the release v$version exists on GitHub." . PHP_EOL
+            );
         }
 
         $tempFile = sys_get_temp_dir() . '/igor.tmp';
