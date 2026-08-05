@@ -840,53 +840,63 @@ func (v *PHPVisitor) scanPropertyTypes(classNode *sitter.Node) {
 	for i := uint(0); i < body.ChildCount(); i++ {
 		member := body.Child(i)
 		if member.Kind() == "property_declaration" {
-			typeNode := member.ChildByFieldName("type")
+			v.handlePropertyDeclaration(member)
+		}
+		if member.Kind() == "method_declaration" {
+			v.handleConstructorDeclaration(member)
+		}
+	}
+}
+
+func (v *PHPVisitor) handlePropertyDeclaration(member *sitter.Node) {
+	typeNode := member.ChildByFieldName("type")
+	var typeStr string
+	if typeNode != nil {
+		typeStr = v.getContent(typeNode)
+	}
+	for j := uint(0); j < member.ChildCount(); j++ {
+		child := member.Child(j)
+		if child.Kind() == "property_element" {
+			nameNode := child.ChildByFieldName("name")
+			if nameNode != nil {
+				propName := strings.TrimPrefix(v.getContent(nameNode), "$")
+				if typeStr != "" {
+					v.propertyTypes[propName] = typeStr
+				}
+				v.declaredProps[propName] = true
+			}
+		}
+	}
+}
+
+func (v *PHPVisitor) handleConstructorDeclaration(member *sitter.Node) {
+	nameNode := member.ChildByFieldName("name")
+	if nameNode == nil || strings.ToLower(v.getContent(nameNode)) != "__construct" {
+		return
+	}
+	params := member.ChildByFieldName("parameters")
+	if params == nil {
+		return
+	}
+	for j := uint(0); j < params.ChildCount(); j++ {
+		param := params.Child(j)
+		if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" {
+			typeNode := param.ChildByFieldName("type")
 			var typeStr string
 			if typeNode != nil {
 				typeStr = v.getContent(typeNode)
 			}
-			for j := uint(0); j < member.ChildCount(); j++ {
-				child := member.Child(j)
-				if child.Kind() == "property_element" {
-					nameNode := child.ChildByFieldName("name")
-					if nameNode != nil {
-						propName := strings.TrimPrefix(v.getContent(nameNode), "$")
-						if typeStr != "" {
-							v.propertyTypes[propName] = typeStr
-						}
+			for k := uint(0); k < param.ChildCount(); k++ {
+				child := param.Child(k)
+				if child.Kind() == "variable_name" {
+					propName := strings.TrimPrefix(v.getContent(child), "$")
+					if typeStr != "" {
+						v.propertyTypes[propName] = typeStr
+					}
+					if param.Kind() == "property_promotion_parameter" {
 						v.declaredProps[propName] = true
 					}
-				}
-			}
-		}
-		if member.Kind() == "method_declaration" {
-			nameNode := member.ChildByFieldName("name")
-			if nameNode != nil && strings.ToLower(v.getContent(nameNode)) == "__construct" {
-				params := member.ChildByFieldName("parameters")
-				if params != nil {
-					for j := uint(0); j < params.ChildCount(); j++ {
-						param := params.Child(j)
-						if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" {
-							typeNode := param.ChildByFieldName("type")
-							var typeStr string
-							if typeNode != nil {
-								typeStr = v.getContent(typeNode)
-							}
-							for k := uint(0); k < param.ChildCount(); k++ {
-								child := param.Child(k)
-								if child.Kind() == "variable_name" {
-									propName := strings.TrimPrefix(v.getContent(child), "$")
-									if typeStr != "" {
-										v.propertyTypes[propName] = typeStr
-									}
-									if param.Kind() == "property_promotion_parameter" {
-										v.declaredProps[propName] = true
-									}
-									break
-								}
-							}
-						}
-					}
+					break
 				}
 			}
 		}
