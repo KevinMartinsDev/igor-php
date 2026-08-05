@@ -138,6 +138,14 @@ $bootstrapper = new class()
         $response = @file_get_contents($url, false, $context);
 
         if ($response === false) {
+            // Offline fallback: Use the expired cache if available
+            if (file_exists(self::VERSION_CACHE_FILE) && is_readable(self::VERSION_CACHE_FILE)) {
+                echo "ℹ️  Igor couldn't reach the laboratory - using cached version." . PHP_EOL;
+                // Update mtime so we don't block on the failing API call on the very next runs
+                @touch(self::VERSION_CACHE_FILE);
+                return trim(file_get_contents(self::VERSION_CACHE_FILE));
+            }
+
             die(
                 sprintf(
                     "❌ Igor couldn't reach the laboratory. URL: %s%sPlease check your internet connection or specify a Igor version by setting the %s env variable." . PHP_EOL,
