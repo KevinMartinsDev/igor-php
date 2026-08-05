@@ -628,7 +628,6 @@ class ValidationAndCacheService {
 		t.Errorf("Expected 0 findings because of infrastructure Taint Breakers, got: %v", findings)
 	}
 }
-
 func TestPHPVisitor_InheritedPropertyReset(t *testing.T) {
 	code := `<?php
 abstract class AbstractAdapter implements Symfony\Contracts\Service\ResetInterface {

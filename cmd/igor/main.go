@@ -112,77 +112,88 @@ func loadAuditBaseline(rootPath string, cfg config.Config) config.Baseline {
 	}
 
 	if !cfg.IgnoreExternalBaseline {
-		vendorDir := filepath.Join(rootPath, "vendor")
-		vendors, err := os.ReadDir(vendorDir)
-		if err == nil {
-			externalCount := 0
-			for _, vDir := range vendors {
-				if !vDir.IsDir() {
-					continue
-				}
-				vName := vDir.Name()
-				if vName == "bin" || vName == "composer" || strings.HasPrefix(vName, ".") {
-					continue
-				}
+		discoverAndMergeExternalBaselines(rootPath, cfg, &baseline)
+	}
 
-				packagesDir := filepath.Join(vendorDir, vName)
-				pkgs, err := os.ReadDir(packagesDir)
-				if err != nil {
-					continue
-				}
-				for _, pDir := range pkgs {
-					if !pDir.IsDir() {
-						continue
-					}
-					pName := pDir.Name()
-					packagePath := filepath.Join(packagesDir, pName)
+	return baseline
+}
 
-					configPath := filepath.Join(packagePath, "igor.json")
-					var baselinePath string
+func discoverAndMergeExternalBaselines(rootPath string, cfg config.Config, baseline *config.Baseline) {
+	vendorDir := filepath.Join(rootPath, "vendor")
+	vendors, err := os.ReadDir(vendorDir)
+	if err != nil {
+		return
+	}
 
-					if _, err := os.Stat(configPath); err == nil {
-						pkgCfg := config.LoadConfig(packagePath, configPath)
-						if pkgCfg.BaselinePath != "" {
-							baselinePath = pkgCfg.BaselinePath
-							if !filepath.IsAbs(baselinePath) {
-								baselinePath = filepath.Join(packagePath, baselinePath)
-							}
-						}
-					}
+	externalCount := 0
+	for _, vDir := range vendors {
+		if !vDir.IsDir() {
+			continue
+		}
+		vName := vDir.Name()
+		if vName == "bin" || vName == "composer" || strings.HasPrefix(vName, ".") {
+			continue
+		}
 
-					if baselinePath == "" {
-						defaultBaseline := filepath.Join(packagePath, "igor-baseline.json")
-						if _, err := os.Stat(defaultBaseline); err == nil {
-							baselinePath = defaultBaseline
-						}
-					}
-
-					if baselinePath != "" {
-						externalBaseline, err := config.LoadBaseline(baselinePath)
-						if err == nil {
-							if baseline.Files == nil {
-								baseline.Files = make(map[string][]config.BaselineEntry)
-							}
-							for relVendorPath, entries := range externalBaseline.Files {
-								parentRelPath := filepath.Join("vendor", vName, pName, relVendorPath)
-								baseline.Files[parentRelPath] = entries
-								externalCount++
-							}
-						} else {
-							if cfg.Verbose {
-								fmt.Fprintf(os.Stderr, "⚠️  Warning: Could not load external baseline from %s: %v\n", baselinePath, err)
-							}
-						}
-					}
-				}
+		packagesDir := filepath.Join(vendorDir, vName)
+		pkgs, err := os.ReadDir(packagesDir)
+		if err != nil {
+			continue
+		}
+		for _, pDir := range pkgs {
+			if !pDir.IsDir() {
+				continue
 			}
-			if externalCount > 0 {
-				fmt.Fprintf(os.Stderr, "🛡️  Loaded %d external baseline paths from vendor dependencies.\n", externalCount)
+			pName := pDir.Name()
+			packagePath := filepath.Join(packagesDir, pName)
+
+			externalCount += loadAndMergePackageBaseline(packagePath, vName, pName, cfg, baseline)
+		}
+	}
+	if externalCount > 0 {
+		fmt.Fprintf(os.Stderr, "🛡️  Loaded %d external baseline paths from vendor dependencies.\n", externalCount)
+	}
+}
+
+func loadAndMergePackageBaseline(packagePath, vName, pName string, cfg config.Config, baseline *config.Baseline) int {
+	configPath := filepath.Join(packagePath, "igor.json")
+	var baselinePath string
+
+	if _, err := os.Stat(configPath); err == nil {
+		pkgCfg := config.LoadConfig(packagePath, configPath)
+		if pkgCfg.BaselinePath != "" {
+			baselinePath = pkgCfg.BaselinePath
+			if !filepath.IsAbs(baselinePath) {
+				baselinePath = filepath.Join(packagePath, baselinePath)
 			}
 		}
 	}
 
-	return baseline
+	if baselinePath == "" {
+		defaultBaseline := filepath.Join(packagePath, "igor-baseline.json")
+		if _, err := os.Stat(defaultBaseline); err == nil {
+			baselinePath = defaultBaseline
+		}
+	}
+
+	if baselinePath != "" {
+		externalBaseline, err := config.LoadBaseline(baselinePath)
+		if err == nil {
+			if baseline.Files == nil {
+				baseline.Files = make(map[string][]config.BaselineEntry)
+			}
+			count := 0
+			for relVendorPath, entries := range externalBaseline.Files {
+				parentRelPath := filepath.Join("vendor", vName, pName, relVendorPath)
+				baseline.Files[parentRelPath] = entries
+				count++
+			}
+			return count
+		} else if cfg.Verbose {
+			fmt.Fprintf(os.Stderr, "⚠️  Warning: Could not load external baseline from %s: %v\n", baselinePath, err)
+		}
+	}
+	return 0
 }
 
 // loadContainerDump resolves and parses the generic container-dump file (if
@@ -529,7 +540,6 @@ func collectFiles(rootPath string, cfg config.Config, aud *auditor.Auditor) []sy
 	if aud.Symfony != nil && aud.Symfony.Container != nil {
 		fmt.Fprintln(os.Stderr, "🎯 Symfony detected: Mapping services and dependencies...")
 		auditList = append(auditList, collectSymfonyServices(rootPath, cfg, aud, processedFiles)...)
-
 		// Also collect parent classes and traits resolved by reflection that are not yet processed
 		for class, path := range aud.Symfony.ClassToFile {
 			if processedFiles[path] {
