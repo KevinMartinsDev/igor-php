@@ -12,7 +12,13 @@ $bootstrapper = new class()
     {
         $version = self::determineTargetVersion();
         if ($version === null || $version === 'latest') {
+            echo 'ℹ️ Falling back to latest version.';
             $version = self::determineLatestVersion();
+        }
+
+        // Enforce safe alphanumeric characters for the version string
+        if (!preg_match('/^[a-zA-Z0-9.\-_]+$/', $version)) {
+            die("❌ Invalid version format specified.\n");
         }
 
         $os = strtolower(PHP_OS_FAMILY);
@@ -55,12 +61,12 @@ $bootstrapper = new class()
         return $exitCode;
     }
 
-    private static function autoload(): void
+    private static function autoload(): bool
     {
         $autoloadLocationOverride = getenv(self::AUTOLOAD_LOCATION_ENV_VARIABLE_NAME);
         if ($autoloadLocationOverride !== false) {
             require_once $autoloadLocationOverride;
-            return;
+            return true;
         }
 
         $potentialAutoloadLocations = [
@@ -71,30 +77,38 @@ $bootstrapper = new class()
         foreach ($potentialAutoloadLocations as $potentialAutoloadLocation) {
             if (is_file($potentialAutoloadLocation)) {
                 require_once $potentialAutoloadLocation;
-                return;
+                return true;
             }
         }
 
-        die(
-            sprintf(
-                "❌ Igor couldn't find the autoloader.\n Specify autoloader location by setting the %s env variable.",
-                self::AUTOLOAD_LOCATION_ENV_VARIABLE_NAME
-            )
+        echo sprintf(
+            "❌ Igor couldn't find the autoloader.\n Specify autoloader location by setting the %s env variable.",
+            self::AUTOLOAD_LOCATION_ENV_VARIABLE_NAME
         );
+
+        return false;
     }
 
     private static function determineTargetVersion(): ?string
     {
-        $versionOverride = getenv(self::VERSION_ENV_VARIABLE_NAME);
-        if ($versionOverride !== false) {
-            return $versionOverride;
-        }
+        try {
+            $versionOverride = getenv(self::VERSION_ENV_VARIABLE_NAME);
+            if ($versionOverride !== false) {
+                return $versionOverride;
+            }
 
-        self::autoload();
+            if (self::autoload() === false) {
+                return null;
+            }
 
-        $versionString = trim(\Composer\InstalledVersions::getPrettyVersion('igor-php/igor-php'));
-        if (preg_match('/^v?(\d+\.\d+\.\d+)$/', $versionString, $matches) === 1) {
-            return $matches[1];
+            $versionString = trim(\Composer\InstalledVersions::getPrettyVersion('igor-php/igor-php'));
+            if (preg_match('/^v?(\d+\.\d+\.\d+)$/', $versionString, $matches) === 1) {
+                return $matches[1];
+            }
+        } catch(Throwable $throwable) {
+            // Fallback gracefully on local dev clones or non-composer setups
+            echo '⚠️ Error while determining current version:' . PHP_EOL
+                    . $throwable->getMessage();
         }
 
         return null;
@@ -158,9 +172,9 @@ $bootstrapper = new class()
         file_put_contents($tempFile, $content);
 
         if ($os === 'windows') {
-            exec(sprintf("powershell Expand-Archive -Path %s -DestinationPath %s", $tempFile, $targetPath));
+            exec(sprintf("powershell Expand-Archive -Path %s -DestinationPath %s", escapeshellarg($tempFile), escapeshellarg($targetPath)));
         } else {
-            exec(sprintf("tar -xzf %s -C %s", $tempFile, $targetPath));
+            exec(sprintf("tar -xzf %s -C %s", escapeshellarg($tempFile), escapeshellarg($targetPath)));
         }
 
         unlink($tempFile);

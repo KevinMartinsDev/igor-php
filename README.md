@@ -75,7 +75,7 @@ During its static analysis of shared/singleton services, Igor recursively scans 
 composer require --dev igor-php/igor-php
 ```
 
-When running Igor, the included php bootstrapper for will download the Go binary of Igor in the version matching the installed composer-package version.  
+When running Igor, the included php bootstrapper will download the Go binary of Igor in the version matching the installed composer-package version.  
 You can override this behavior by setting the `IGOR_VERSION` environment variable to a version string (i.e. `0.8.9`) to use a specific version or to `latest` to always get the latest version.
 
 In case your `autoload.php` is not in the standard location `vendor/autoload.php` you have to set it via the `IGOR_AUTOLOAD_LOCATION` environment variable.
