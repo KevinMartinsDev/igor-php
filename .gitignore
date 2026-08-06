@@ -1,6 +1,7 @@
 # Binaries
 igor-php
 !bin/igor-php
+bin/igor
 resources/bin/*
 bin/igor
 
