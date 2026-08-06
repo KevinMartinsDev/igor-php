@@ -274,6 +274,7 @@ You can customize Igor's behavior by creating an `igor.json` file at the root of
   "scan_vendors": ["my-company/internal-bundle"],
   "ignore_vendors": false,
   "baseline": "igor-baseline.json",
+  "ignore_external_baseline": false,
   "container_dump": "igor-container.json",
   "console_path": "bin/console",
   "env": "dev",
@@ -286,10 +287,44 @@ You can customize Igor's behavior by creating an `igor.json` file at the root of
 - **scan_vendors**: List of sub-directories within `vendor/` to scan recursively.
 - **ignore_vendors**: Set to `true` to skip auditing all services located within the `vendor/` directory. Defaults to `false`.
 - **baseline**: Path to a baseline file containing findings to ignore.
+- **ignore_external_baseline**: Set to `true` to skip discovering and merging baseline files from external vendor packages. Defaults to `false`.
 - **container_dump**: Path to a generic container dump JSON (`{ "services": [ { "class": ..., "shared": bool } ] }`) listing non-shared/transient classes to skip. Equivalent to the `--container-dump` flag.
 - **console_path**: Custom path to the Symfony console binary. Defaults to `bin/console`.
 - **env**: Symfony environment to use for container analysis. Defaults to `dev`.
 - **verbose**: Enable verbose output to see skipped services and reasons. Defaults to `false`.
+
+### 🛡️ Baselines & External Vendor Baselines
+
+When you first adopt Igor, you might want to grandfather in existing technical debt by generating a baseline file:
+
+```bash
+# Generate a baseline file (default name: igor-baseline.json)
+igor-php --generate-baseline .
+```
+
+Subsequent audits will ignore findings present in this baseline file.
+
+#### Support for External Vendor Baselines
+If your project depends on other local packages or vendor dependencies that also manage their technical debt with `igor-php`, Igor will **automatically discover, translate, and merge** their baselines into the audit!
+
+- **Auto-Discovery**: Igor scans all packages inside `vendor/`. If a vendor package contains an `igor.json` with a custom `baseline` path, or has a default `igor-baseline.json` file in its directory, Igor loads it.
+- **Path Translation**: Igor translates the relative paths within the vendor baseline (e.g., `src/Service.php` in the package) into the context of the parent project (e.g., `vendor/acme/package1/src/Service.php`).
+- **Seamless Merging**: These translated paths are merged on the fly into the active baseline, meaning you won't have to manually copy-paste external baseline entries into your project's baseline!
+
+If you want to disable this behavior and only apply your root project's baseline:
+
+```bash
+# Ignore baselines from vendor dependencies
+igor-php --ignore-external-baseline .
+```
+
+You can also set this permanently in `igor.json`:
+
+```json
+{
+  "ignore_external_baseline": true
+}
+```
 
 💡 RECOMMENDATIONS:
   [PROJECT] Since this is your code, you should refactor these services to be stateless
