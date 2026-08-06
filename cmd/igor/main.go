@@ -49,6 +49,46 @@ func main() {
 	// 6. Run Audit
 	results := executeAudit(auditList, aud, cfg, baseline, rootPath)
 
+	// 7a. Handle Baseline Checking
+	if cfg.CheckBaseline {
+		staleEntries := config.IdentifyStaleEntries(baseline, results, rootPath)
+		if len(staleEntries) > 0 {
+			fmt.Fprintf(os.Stderr, "❌ Baseline check failed: %d stale entries detected in baseline (%s):\n", len(staleEntries), cfg.BaselinePath)
+			for _, entry := range staleEntries {
+				fmt.Fprintf(os.Stderr, "  - %s: %s\n", entry.FilePath, entry.Message)
+			}
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "✨ Baseline check passed! The baseline (%s) is perfectly clean and up to date.\n", cfg.BaselinePath)
+		return
+	}
+
+	// 7b. Handle Baseline Pruning
+	if cfg.PruneBaseline {
+		staleEntries := config.IdentifyStaleEntries(baseline, results, rootPath)
+		if len(staleEntries) == 0 {
+			fmt.Fprintf(os.Stderr, "✨ No stale entries found. The baseline (%s) is already up to date.\n", cfg.BaselinePath)
+			return
+		}
+
+		fmt.Fprintf(os.Stderr, "⚙️  Pruning %d stale entries from baseline (%s)...\n", len(staleEntries), cfg.BaselinePath)
+		prunedBaseline := config.PruneBaseline(baseline, staleEntries)
+
+		baselineFile := cfg.BaselinePath
+		if !filepath.IsAbs(baselineFile) {
+			baselineFile = filepath.Join(rootPath, baselineFile)
+		}
+
+		err := config.WriteBaseline(baselineFile, prunedBaseline)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error saving pruned baseline: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Fprintf(os.Stderr, "✨ Baseline successfully pruned and saved to: %s\n", baselineFile)
+		return
+	}
+
 	// 7. Handle Baseline Generation
 	if cfg.GenerateBaseline {
 		generateBaselineFile(rootPath, cfg, results)
@@ -225,7 +265,7 @@ func executeAudit(auditList []symbol.AuditStatus, aud *auditor.Auditor, cfg conf
 	var finalResults []symbol.AuditStatus
 
 	for res := range resultsChan {
-		if !cfg.GenerateBaseline && baseline.Files != nil {
+		if !cfg.GenerateBaseline && !cfg.CheckBaseline && !cfg.PruneBaseline && baseline.Files != nil {
 			res.Findings = config.FilterFindings(baseline, res.FilePath, res.Findings, rootPath)
 			res.Status = calculateAuditStatus(res.Findings)
 		}
@@ -273,6 +313,8 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 	flag.StringVar(&configPath, "c", "", "Custom path to igor.json (shorthand)")
 	baselineFlag := flag.String("baseline", "", "Path to baseline file")
 	generateBaselineFlag := flag.Bool("generate-baseline", false, "Generate a baseline file from current findings")
+	checkBaselineFlag := flag.Bool("check-baseline", false, "Verify if the baseline is clean (fails if any baseline entries are no longer detected)")
+	pruneBaselineFlag := flag.Bool("prune-baseline", false, "Remove stale entries from the baseline automatically")
 	consoleFlag := flag.String("console", "", "Custom path to Symfony console (e.g. app/console)")
 	envFlag := flag.String("env", "", "Symfony environment (default: dev)")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose output to see skipped services and details")
@@ -326,7 +368,7 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 	rootPath, _ := filepath.Abs(args[0])
 
 	cfg := config.LoadConfig(rootPath, configPath)
-	applyFlagOverrides(&cfg, consoleFlag, envFlag, verboseFlag, noAgentFlag, outputFlag, generateBaselineFlag, baselineFlag, containerDumpFlag, ignoreExternalBaselineFlag)
+	applyFlagOverrides(&cfg, consoleFlag, envFlag, verboseFlag, noAgentFlag, outputFlag, generateBaselineFlag, baselineFlag, containerDumpFlag, ignoreExternalBaselineFlag, checkBaselineFlag, pruneBaselineFlag)
 
 	// Display summary of packages
 	if len(cfg.ProdPackages) > 0 || len(cfg.DevPackages) > 0 {
@@ -469,7 +511,7 @@ func handleAPIReview(content string, cfg config.Config) {
 	os.Exit(0)
 }
 
-func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verboseFlag, noAgentFlag *bool, outputFlag *string, generateBaselineFlag *bool, baselineFlag, containerDumpFlag *string, ignoreExternalBaselineFlag *bool) {
+func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verboseFlag, noAgentFlag *bool, outputFlag *string, generateBaselineFlag *bool, baselineFlag, containerDumpFlag *string, ignoreExternalBaselineFlag *bool, checkBaselineFlag, pruneBaselineFlag *bool) {
 	if *consoleFlag != "" {
 		cfg.ConsolePath = *consoleFlag
 	}
@@ -491,15 +533,24 @@ func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verbos
 	if *ignoreExternalBaselineFlag {
 		cfg.IgnoreExternalBaseline = true
 	}
-	if *generateBaselineFlag {
+	if *checkBaselineFlag {
+		cfg.CheckBaseline = true
+	}
+	if *pruneBaselineFlag {
+		cfg.PruneBaseline = true
+	}
+	switch {
+	case *generateBaselineFlag:
 		cfg.GenerateBaseline = true
 		if *baselineFlag != "" {
 			cfg.BaselinePath = *baselineFlag
 		} else if cfg.BaselinePath == "" {
 			cfg.BaselinePath = "igor-baseline.json"
 		}
-	} else if *baselineFlag != "" {
+	case *baselineFlag != "":
 		cfg.BaselinePath = *baselineFlag
+	case cfg.BaselinePath == "" && (cfg.CheckBaseline || cfg.PruneBaseline):
+		cfg.BaselinePath = "igor-baseline.json"
 	}
 }
 func reportAllFindings(rep reporter.Reporter, results []symbol.AuditStatus, rootPath string) {
