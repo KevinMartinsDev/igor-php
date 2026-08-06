@@ -2,6 +2,7 @@
 igor-php
 !bin/igor-php
 resources/bin/*
+bin/igor
 
 # IDEs
 .idea/
