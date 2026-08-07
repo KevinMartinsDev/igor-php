@@ -146,6 +146,44 @@ igor-php --console app/console --env stage --verbose .
 igor-php --no-agent .
 ```
 
+### 🛡️ Baseline Management
+
+In legacy projects or during initial integration, you might want to ignore existing findings to prevent CI pipeline failures and focus on new code. Igor supports baseline files with advanced checking and cleaning commands.
+
+#### 1. Generating a baseline
+To create a baseline of all currently detected findings:
+```bash
+igor-php --generate-baseline .
+```
+This generates an `igor-baseline.json` file (or writes to the file path specified by `--baseline`). Each ignored entry has a `reason` field pre-filled with a default comment. We highly encourage developers to document why an exclusion is a false positive or safe rather than just hiding alerts:
+```json
+{
+  "files": {
+    "src/Service/MyService.php": [
+      {
+        "message": "Mutation of state 'static::$cache' in MyService::cache()",
+        "reason": "TODO: Explain why this state mutation is a false positive or safe"
+      }
+    ]
+  }
+}
+```
+
+#### 2. Checking baseline freshness (CI integration)
+Over time, files get refactored, fixed, or deleted. To ensure your baseline doesn't become a graveyard of obsolete rules, run the check command:
+```bash
+igor-php --check-baseline .
+```
+- If any baseline entries are **no longer detected** in the scanned files, Igor will report them as stale and exit with **code 1**.
+- If the baseline is clean and perfectly up-to-date, it exits with **code 0**.
+
+#### 3. Automatically pruning stale baseline entries
+To automatically clean up your baseline by removing all stale/obsolete entries:
+```bash
+igor-php --prune-baseline .
+```
+This will rewrite `igor-baseline.json` (or your custom baseline path) on disk, removing any rules that are no longer active, keeping your configuration neat and relevant.
+
 ### Non-Symfony Projects
 Igor can also audit standard PHP projects that don't use the Symfony framework. In this case, use the `--no-agent` flag to disable automatic container discovery.
 

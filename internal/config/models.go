@@ -15,6 +15,8 @@ type Config struct {
 	ProdPackages           []string  `json:"-"` // List of require packages from composer.json
 	DevPackages            []string  `json:"-"` // List of require-dev packages from composer.json
 	GenerateBaseline       bool      `json:"-"` // Internal: set if --generate-baseline is used
+	CheckBaseline          bool      `json:"-"` // Internal: set if --check-baseline is used
+	PruneBaseline          bool      `json:"-"` // Internal: set if --prune-baseline is used
 	OutputFormat           string    `json:"output"`
 	ContainerDump          string    `json:"container_dump"` // Path to a generic container dump (framework-agnostic non-shared service graph)
 	LLMConfig              LLMConfig `json:"llm"`
@@ -36,4 +38,5 @@ type Baseline struct {
 // BaselineEntry represents a single finding in the baseline.
 type BaselineEntry struct {
 	Message string `json:"message"`
+	Reason  string `json:"reason,omitempty"`
 }
