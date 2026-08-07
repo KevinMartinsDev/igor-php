@@ -103,11 +103,16 @@ func InitConfig(root string, customConfigPath string) (string, error) {
 
 	// Minimal base configuration
 	c := Config{
-		Exclude:        []string{},
-		SafeNamespaces: []string{"Psr\\"},
-		ConsolePath:    "bin/console",
-		Env:            "prod",
-		Verbose:        false,
+		Exclude: []string{},
+		SafeNamespaces: []string{
+			"Symfony\\",
+			"Doctrine\\",
+			"Psr\\",
+			"IgorPhp\\IgorBundle\\",
+		},
+		ConsolePath: "bin/console",
+		Env:         "prod",
+		Verbose:     false,
 	}
 	projectType := "Generic PHP"
 
