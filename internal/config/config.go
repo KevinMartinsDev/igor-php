@@ -57,6 +57,9 @@ func LoadConfig(root string, customConfigPath string) Config {
 	if userConfig.IgnoreVendors {
 		c.IgnoreVendors = true
 	}
+	if userConfig.IgnoreExternalBaseline {
+		c.IgnoreExternalBaseline = true
+	}
 	if userConfig.BaselinePath != "" {
 		c.BaselinePath = userConfig.BaselinePath
 	}

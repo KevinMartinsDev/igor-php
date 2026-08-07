@@ -103,6 +103,24 @@ func TestLoadConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadConfig_IgnoreExternalBaseline(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "igor_config_ignore_external_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	content := `{"ignore_external_baseline": true}`
+	err = os.WriteFile(filepath.Join(tmpDir, "igor.json"), []byte(content), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := LoadConfig(tmpDir, "")
+	if !cfg.IgnoreExternalBaseline {
+		t.Errorf("Expected IgnoreExternalBaseline to be true, got false")
+	}
+}
 func TestInitConfig(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "igor_init_test")
 	if err != nil {
