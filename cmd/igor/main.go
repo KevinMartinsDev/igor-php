@@ -596,6 +596,9 @@ func collectFiles(rootPath string, cfg config.Config, aud *auditor.Auditor) []sy
 			if processedFiles[path] {
 				continue
 			}
+			if aud.IsSafeNamespace(class) {
+				continue
+			}
 			if skip, _ := shouldSkipServicePath("", path, cfg, aud, rootPath); skip {
 				continue
 			}

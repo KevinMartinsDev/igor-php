@@ -528,6 +528,14 @@ func (v *PHPVisitor) addFinding(n *sitter.Node, msg, hint, severity string) {
 		return
 	}
 
+	fullName := v.curClass
+	if v.namespace != "" {
+		fullName = v.namespace + "\\" + v.curClass
+	}
+	if v.engine != nil && v.engine.IsSafeNamespace(fullName) {
+		return
+	}
+
 	row := int(n.StartPosition().Row)
 	lineContent := v.lines[row]
 
