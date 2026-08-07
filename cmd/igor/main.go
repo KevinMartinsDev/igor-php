@@ -151,7 +151,7 @@ func loadAuditBaseline(rootPath string, cfg config.Config) config.Baseline {
 		}
 	}
 
-	if !cfg.IgnoreExternalBaseline {
+	if !cfg.IgnoreExternalBaseline && !cfg.CheckBaseline && !cfg.PruneBaseline {
 		discoverAndMergeExternalBaselines(rootPath, cfg, &baseline)
 	}
 
