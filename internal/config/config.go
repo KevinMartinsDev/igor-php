@@ -14,6 +14,7 @@ func DefaultConfig() Config {
 		SafeNamespaces: []string{
 			"Symfony\\",
 			"Doctrine\\",
+			"Psr\\",
 			"IgorPhp\\IgorBundle\\",
 		},
 		ConsolePath: "bin/console",
@@ -103,7 +104,7 @@ func InitConfig(root string, customConfigPath string) (string, error) {
 	// Minimal base configuration
 	c := Config{
 		Exclude:        []string{},
-		SafeNamespaces: []string{},
+		SafeNamespaces: []string{"Psr\\"},
 		ConsolePath:    "bin/console",
 		Env:            "prod",
 		Verbose:        false,

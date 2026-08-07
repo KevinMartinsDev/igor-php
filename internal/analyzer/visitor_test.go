@@ -684,3 +684,41 @@ class ConcreteAdapterWithLocalProps implements Symfony\Contracts\Service\ResetIn
 		t.Error("Expected a warning for local property 'localProp' in ConcreteAdapterWithLocalProps")
 	}
 }
+
+type mockSafeNamespaceEngine struct {
+	mockEngine
+	safeNamespace string
+}
+
+func (m *mockSafeNamespaceEngine) IsSafeNamespace(className string) bool {
+	return className == m.safeNamespace
+}
+
+func TestPHPVisitor_IsSafeNamespaceBypass(t *testing.T) {
+	code := `<?php
+namespace Symfony\Component\HttpClient;
+
+class CachingHttpClient {
+    public function doSomething() {
+        static $attemptTag = null;
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockSafeNamespaceEngine{
+		safeNamespace: "Symfony\\Component\\HttpClient\\CachingHttpClient",
+	}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	if len(findings) > 0 {
+		t.Errorf("Expected 0 findings inside safe namespace, got %d: %v", len(findings), findings)
+	}
+}
