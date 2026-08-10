@@ -36,7 +36,7 @@ func main() {
 	aud.Symfony = detectSymfonyProject(rootPath, cfg)
 
 	// 3. Load Baseline
-	baseline := loadAuditBaseline(rootPath, cfg)
+	baseline := loadAuditBaseline(rootPath, &cfg)
 
 	// 4. Collect Files to Audit
 	auditList := collectFiles(rootPath, cfg, aud)
@@ -128,7 +128,7 @@ func detectSymfonyProject(rootPath string, cfg config.Config) *auditor.SymfonyBr
 	return sb
 }
 
-func loadAuditBaseline(rootPath string, cfg config.Config) config.Baseline {
+func loadAuditBaseline(rootPath string, cfg *config.Config) config.Baseline {
 	if cfg.GenerateBaseline {
 		return config.Baseline{}
 	}
@@ -151,23 +151,32 @@ func loadAuditBaseline(rootPath string, cfg config.Config) config.Baseline {
 		}
 	}
 
-	if !cfg.IgnoreExternalBaseline && !cfg.CheckBaseline && !cfg.PruneBaseline {
-		discoverAndMergeExternalBaselines(rootPath, cfg, &baseline)
-	}
+	discoverAndMergeExternalBaselines(rootPath, cfg, &baseline)
 
 	return baseline
 }
 
-func discoverAndMergeExternalBaselines(rootPath string, cfg config.Config, baseline *config.Baseline) {
+func discoverAndMergeExternalBaselines(rootPath string, cfg *config.Config, baseline *config.Baseline) {
 	vendorDir := filepath.Join(rootPath, "vendor")
 	vendors, err := os.ReadDir(vendorDir)
 	if err != nil {
 		return
 	}
 
+	if cfg.SymlinkMap == nil {
+		cfg.SymlinkMap = make(map[string]string)
+	}
+
 	externalCount := 0
 	for _, vDir := range vendors {
-		if !vDir.IsDir() {
+		isDir := vDir.IsDir()
+		if !isDir && (vDir.Type()&os.ModeSymlink != 0) {
+			path := filepath.Join(vendorDir, vDir.Name())
+			if info, err := os.Stat(path); err == nil && info.IsDir() {
+				isDir = true
+			}
+		}
+		if !isDir {
 			continue
 		}
 		vName := vDir.Name()
@@ -181,13 +190,30 @@ func discoverAndMergeExternalBaselines(rootPath string, cfg config.Config, basel
 			continue
 		}
 		for _, pDir := range pkgs {
-			if !pDir.IsDir() {
+			isPkgDir := pDir.IsDir()
+			isSymlink := pDir.Type()&os.ModeSymlink != 0
+			if !isPkgDir && isSymlink {
+				path := filepath.Join(packagesDir, pDir.Name())
+				if info, err := os.Stat(path); err == nil && info.IsDir() {
+					isPkgDir = true
+				}
+			}
+			if !isPkgDir {
 				continue
 			}
 			pName := pDir.Name()
 			packagePath := filepath.Join(packagesDir, pName)
 
-			externalCount += loadAndMergePackageBaseline(packagePath, vName, pName, cfg, baseline)
+			if isSymlink {
+				realPath, err := filepath.EvalSymlinks(packagePath)
+				if err == nil {
+					cfg.SymlinkMap[realPath] = filepath.Join("vendor", vName, pName)
+				}
+			}
+
+			if !cfg.IgnoreExternalBaseline && !cfg.CheckBaseline && !cfg.PruneBaseline {
+				externalCount += loadAndMergePackageBaseline(packagePath, vName, pName, isSymlink, *cfg, baseline)
+			}
 		}
 	}
 	if externalCount > 0 {
@@ -195,7 +221,7 @@ func discoverAndMergeExternalBaselines(rootPath string, cfg config.Config, basel
 	}
 }
 
-func loadAndMergePackageBaseline(packagePath, vName, pName string, cfg config.Config, baseline *config.Baseline) int {
+func loadAndMergePackageBaseline(packagePath, vName, pName string, isSymlink bool, cfg config.Config, baseline *config.Baseline) int {
 	configPath := filepath.Join(packagePath, "igor.json")
 	var baselinePath string
 
@@ -219,6 +245,12 @@ func loadAndMergePackageBaseline(packagePath, vName, pName string, cfg config.Co
 	if baselinePath != "" {
 		externalBaseline, err := config.LoadBaseline(baselinePath)
 		if err == nil {
+			linkType := "regular"
+			if isSymlink {
+				linkType = "symlinked"
+			}
+			fmt.Fprintf(os.Stderr, "🛡️  Found %s external baseline for package %s/%s at: %s (%d files ignored)\n", linkType, vName, pName, baselinePath, len(externalBaseline.Files))
+
 			if baseline.Files == nil {
 				baseline.Files = make(map[string][]config.BaselineEntry)
 			}
@@ -265,6 +297,7 @@ func executeAudit(auditList []symbol.AuditStatus, aud *auditor.Auditor, cfg conf
 	var finalResults []symbol.AuditStatus
 
 	for res := range resultsChan {
+		res.FilePath = cfg.NormalizePath(res.FilePath)
 		if !cfg.GenerateBaseline && !cfg.CheckBaseline && !cfg.PruneBaseline && baseline.Files != nil {
 			res.Findings = config.FilterFindings(baseline, res.FilePath, res.Findings, rootPath)
 			res.Status = calculateAuditStatus(res.Findings)
@@ -328,7 +361,8 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  %s [options] <directory>    Audit a project\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s init [options] [directory] Initialize a new igor.json config\n", binName)
-		fmt.Fprintf(os.Stderr, "  %s review <json_file>       Review an audit JSON export with an LLM\n\n", binName)
+		fmt.Fprintf(os.Stderr, "  %s review <json_file>       Review an audit JSON export with an LLM\n", binName)
+		fmt.Fprintf(os.Stderr, "  %s debug-external-baseline [directory] List all discovered vendor baselines in the project\n\n", binName)
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
@@ -339,6 +373,7 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 		fmt.Fprintf(os.Stderr, "  %s -c custom-igor.json .\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s init\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s review igor-export.json\n", binName)
+		fmt.Fprintf(os.Stderr, "  %s debug-external-baseline .\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s --env stage --verbose ./my-project\n", binName)
 	}
 
@@ -357,6 +392,9 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 			return config.Config{}, "", true
 		case "review":
 			handleReviewSubcommand(args, configPath)
+			return config.Config{}, "", true
+		case "debug-external-baseline":
+			handleDebugExternalBaselineSubcommand(args, configPath)
 			return config.Config{}, "", true
 		}
 	}
@@ -509,6 +547,38 @@ func handleAPIReview(content string, cfg config.Config) {
 
 	fmt.Fprintf(os.Stderr, "✨ %s Review complete! Results saved to igor-review.md\n", modeName)
 	os.Exit(0)
+}
+
+func handleDebugExternalBaselineSubcommand(args []string, configPath string) {
+	targetDir := "."
+	if len(args) > 1 {
+		targetDir = args[1]
+	}
+	rootPath, _ := filepath.Abs(targetDir)
+
+	cfg := config.LoadConfig(rootPath, configPath)
+	var baseline config.Baseline
+	baseline.Files = make(map[string][]config.BaselineEntry)
+
+	fmt.Fprintf(os.Stderr, "🔍 Debugging external baselines for project at: %s\n\n", rootPath)
+
+	discoverAndMergeExternalBaselines(rootPath, &cfg, &baseline)
+
+	fmt.Println("\n📋 Summary of loaded baseline files:")
+	if len(baseline.Files) == 0 {
+		fmt.Println("   No baseline files or entries found.")
+		return
+	}
+
+	for relPath, entries := range baseline.Files {
+		fmt.Printf("   - %s (%d rules ignored)\n", relPath, len(entries))
+		for _, entry := range entries {
+			fmt.Printf("       • %s\n", entry.Message)
+			if entry.Reason != "" {
+				fmt.Printf("           ◦ Reason: %s\n", entry.Reason)
+			}
+		}
+	}
 }
 
 func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verboseFlag, noAgentFlag *bool, outputFlag *string, generateBaselineFlag *bool, baselineFlag, containerDumpFlag *string, ignoreExternalBaselineFlag *bool, checkBaselineFlag, pruneBaselineFlag *bool) {

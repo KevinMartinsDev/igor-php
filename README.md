@@ -348,6 +348,31 @@ If your project depends on other local packages or vendor dependencies that also
 - **Auto-Discovery**: Igor scans all packages inside `vendor/`. If a vendor package contains an `igor.json` with a custom `baseline` path, or has a default `igor-baseline.json` file in its directory, Igor loads it.
 - **Path Translation**: Igor translates the relative paths within the vendor baseline (e.g., `src/Service.php` in the package) into the context of the parent project (e.g., `vendor/acme/package1/src/Service.php`).
 - **Seamless Merging**: These translated paths are merged on the fly into the active baseline, meaning you won't have to manually copy-paste external baseline entries into your project's baseline!
+- **Symlink Support**: If a local vendor package is installed as a symbolic link (e.g., via Composer's `path` repository type under development), Igor automatically detects the symlink, follows its target to discover the baseline, and maps analyzed file paths back to their vendor-relative equivalents (`vendor/acme/my-bundle/...`).
+
+#### 🔍 Debugging Discovered External Baselines
+To list all discovered vendor baselines, check their type (regular file vs. symbolic link), and inspect all ignored rules along with their documented reasons, run the debug subcommand:
+
+```bash
+igor-php debug-external-baseline [directory]
+```
+
+This will print a clean tree structure of all active external baselines:
+
+```text
+🔍 Debugging external baselines for project at: /Users/thomas/projects/my-project
+
+🛡️  Found regular external baseline for package acme/package1 at: /Users/thomas/projects/my-project/vendor/acme/package1/igor-baseline.json (1 files ignored)
+🛡️  Found symlinked external baseline for package acme/package3 at: /Users/thomas/projects/local-packages/package3/igor-baseline.json (1 files ignored)
+🛡️  Loaded 2 external baseline paths from vendor dependencies.
+
+📋 Summary of loaded baseline files:
+   - vendor/acme/package1/src/Service1.php (1 rules ignored)
+       • State mutation detected in Service1
+           ◦ Reason: Legacy code needing refactor
+   - vendor/acme/package3/src/Service3.php (1 rules ignored)
+       • State mutation detected in Service3
+```
 
 If you want to disable this behavior and only apply your root project's baseline:
 
