@@ -184,41 +184,48 @@ func discoverAndMergeExternalBaselines(rootPath string, cfg *config.Config, base
 			continue
 		}
 
-		packagesDir := filepath.Join(vendorDir, vName)
-		pkgs, err := os.ReadDir(packagesDir)
-		if err != nil {
-			continue
-		}
-		for _, pDir := range pkgs {
-			isPkgDir := pDir.IsDir()
-			isSymlink := pDir.Type()&os.ModeSymlink != 0
-			if !isPkgDir && isSymlink {
-				path := filepath.Join(packagesDir, pDir.Name())
-				if info, err := os.Stat(path); err == nil && info.IsDir() {
-					isPkgDir = true
-				}
-			}
-			if !isPkgDir {
-				continue
-			}
-			pName := pDir.Name()
-			packagePath := filepath.Join(packagesDir, pName)
-
-			if isSymlink {
-				realPath, err := filepath.EvalSymlinks(packagePath)
-				if err == nil {
-					cfg.SymlinkMap[realPath] = filepath.Join("vendor", vName, pName)
-				}
-			}
-
-			if !cfg.IgnoreExternalBaseline && !cfg.CheckBaseline && !cfg.PruneBaseline {
-				externalCount += loadAndMergePackageBaseline(packagePath, vName, pName, isSymlink, *cfg, baseline)
-			}
-		}
+		externalCount += discoverVendorPackages(vendorDir, vName, cfg, baseline)
 	}
 	if externalCount > 0 {
 		fmt.Fprintf(os.Stderr, "🛡️  Loaded %d external baseline paths from vendor dependencies.\n", externalCount)
 	}
+}
+
+func discoverVendorPackages(vendorDir, vName string, cfg *config.Config, baseline *config.Baseline) int {
+	packagesDir := filepath.Join(vendorDir, vName)
+	pkgs, err := os.ReadDir(packagesDir)
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	for _, pDir := range pkgs {
+		isPkgDir := pDir.IsDir()
+		isSymlink := pDir.Type()&os.ModeSymlink != 0
+		if !isPkgDir && isSymlink {
+			path := filepath.Join(packagesDir, pDir.Name())
+			if info, err := os.Stat(path); err == nil && info.IsDir() {
+				isPkgDir = true
+			}
+		}
+		if !isPkgDir {
+			continue
+		}
+		pName := pDir.Name()
+		packagePath := filepath.Join(packagesDir, pName)
+
+		if isSymlink {
+			realPath, err := filepath.EvalSymlinks(packagePath)
+			if err == nil {
+				cfg.SymlinkMap[realPath] = filepath.Join("vendor", vName, pName)
+			}
+		}
+
+		if !cfg.IgnoreExternalBaseline && !cfg.CheckBaseline && !cfg.PruneBaseline {
+			count += loadAndMergePackageBaseline(packagePath, vName, pName, isSymlink, *cfg, baseline)
+		}
+	}
+	return count
 }
 
 func loadAndMergePackageBaseline(packagePath, vName, pName string, isSymlink bool, cfg config.Config, baseline *config.Baseline) int {
