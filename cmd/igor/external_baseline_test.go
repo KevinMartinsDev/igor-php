@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/igor-php/igor-php/internal/config"
+	"github.com/igor-php/igor-php/pkg/symbol"
 )
 
 func setupTestExternalBaselineDir(t *testing.T) (string, func()) {
@@ -34,7 +37,10 @@ func setupTestExternalBaselineDir(t *testing.T) (string, func()) {
 	pkg1BaselineContent := `{
 		"files": {
 			"src/Service1.php": [
-				{"message": "State mutation detected in Service1"}
+				{
+					"message": "State mutation detected in Service1",
+					"reason": "Legacy code needing refactor"
+				}
 			]
 		}
 	}`
@@ -94,7 +100,7 @@ func TestExternalBaseline_AutoDiscoveryAndMerging(t *testing.T) {
 		IgnoreExternalBaseline: false,
 	}
 
-	baseline := loadAuditBaseline(tmpDir, cfg)
+	baseline := loadAuditBaseline(tmpDir, &cfg)
 
 	// Check root baseline
 	if _, found := baseline.Files["src/AppService.php"]; !found {
@@ -129,7 +135,7 @@ func TestExternalBaseline_IgnoreExternal(t *testing.T) {
 		IgnoreExternalBaseline: true,
 	}
 
-	baseline := loadAuditBaseline(tmpDir, cfg)
+	baseline := loadAuditBaseline(tmpDir, &cfg)
 
 	// Check root baseline
 	if _, found := baseline.Files["src/AppService.php"]; !found {
@@ -157,7 +163,7 @@ func TestExternalBaseline_CheckBaseline(t *testing.T) {
 		CheckBaseline: true,
 	}
 
-	baseline := loadAuditBaseline(tmpDir, cfg)
+	baseline := loadAuditBaseline(tmpDir, &cfg)
 
 	// Check root baseline
 	if _, found := baseline.Files["src/AppService.php"]; !found {
@@ -180,7 +186,7 @@ func TestExternalBaseline_PruneBaseline(t *testing.T) {
 		PruneBaseline: true,
 	}
 
-	baseline := loadAuditBaseline(tmpDir, cfg)
+	baseline := loadAuditBaseline(tmpDir, &cfg)
 
 	// Check root baseline
 	if _, found := baseline.Files["src/AppService.php"]; !found {
@@ -191,5 +197,125 @@ func TestExternalBaseline_PruneBaseline(t *testing.T) {
 	p1Path := filepath.Join("vendor", "acme", "package1", "src/Service1.php")
 	if _, found := baseline.Files[p1Path]; found {
 		t.Errorf("Expected package1 baseline path %q to be ignored under prune-baseline", p1Path)
+	}
+}
+
+func TestExternalBaseline_SymlinkedBundle(t *testing.T) {
+	// Create a temporary root directory for the parent project
+	tmpDir, err := os.MkdirTemp("", "igor_symlink_baseline_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Create vendor structure
+	vendorDir := filepath.Join(tmpDir, "vendor")
+	orgDir := filepath.Join(vendorDir, "acme")
+	if err := os.MkdirAll(orgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create target bundle directory outside vendor
+	localPackagesDir := filepath.Join(tmpDir, "local-packages")
+	pkg3Dir := filepath.Join(localPackagesDir, "package3")
+	if err := os.MkdirAll(filepath.Join(pkg3Dir, "src"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create baseline file for package3
+	pkg3BaselineContent := `{
+		"files": {
+			"src/Service3.php": [
+				{"message": "State mutation detected in Service3"}
+			]
+		}
+	}`
+	err = os.WriteFile(filepath.Join(pkg3Dir, "igor-baseline.json"), []byte(pkg3BaselineContent), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create symbolic link under vendor pointing to package3 outside vendor
+	symlinkPath := filepath.Join(orgDir, "package3")
+	err = os.Symlink(pkg3Dir, symlinkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{
+		BaselinePath:           "igor-baseline.json",
+		IgnoreExternalBaseline: false,
+	}
+
+	// Load the baseline
+	baseline := loadAuditBaseline(tmpDir, &cfg)
+
+	p3Path := filepath.Join("vendor", "acme", "package3", "src/Service3.php")
+	p3Entries, found := baseline.Files[p3Path]
+	if !found {
+		t.Fatalf("Expected package3 baseline path %q to be loaded", p3Path)
+	}
+	if len(p3Entries) != 1 || p3Entries[0].Message != "State mutation detected in Service3" {
+		t.Errorf("Unexpected entries for package3: %v", p3Entries)
+	}
+
+	// Test path translation during FilterFindings (simulating PHP reflection's real path)
+	realFilePath := filepath.Join(pkg3Dir, "src/Service3.php")
+	normalizedPath := cfg.NormalizePath(realFilePath)
+	findings := []symbol.Finding{
+		{Message: "State mutation detected in Service3"},
+	}
+
+	filtered := config.FilterFindings(baseline, normalizedPath, findings, tmpDir)
+	if len(filtered) != 0 {
+		t.Errorf("Expected findings for symlinked file %q (normalized: %q) to be filtered out by baseline, but got: %v", realFilePath, normalizedPath, filtered)
+	}
+}
+
+func TestExternalBaseline_DebugSubcommand(t *testing.T) {
+	tmpDir, cleanup := setupTestExternalBaselineDir(t)
+	defer cleanup()
+
+	// Redirect stdout to capture the output of the subcommand
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	// Run subcommand
+	handleDebugExternalBaselineSubcommand([]string{"debug-external-baseline", tmpDir}, "")
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	output := buf.String()
+
+	// Verify stdout contains the summary of loaded baseline files
+	if !strings.Contains(output, "Summary of loaded baseline files:") {
+		t.Errorf("Expected output to contain summary title, got:\n%s", output)
+	}
+
+	// Verify it contains the path of package1 baseline translation
+	expectedP1 := filepath.Join("vendor", "acme", "package1", "src/Service1.php")
+	if !strings.Contains(output, expectedP1) {
+		t.Errorf("Expected output to contain package1 relative path %q, got:\n%s", expectedP1, output)
+	}
+
+	// Verify it contains package2 path translation
+	expectedP2 := filepath.Join("vendor", "acme", "package2", "src/Service2.php")
+	if !strings.Contains(output, expectedP2) {
+		t.Errorf("Expected output to contain package2 relative path %q, got:\n%s", expectedP2, output)
+	}
+
+	// Verify it contains the reason for package1 on a separate indented line
+	expectedReason := "           ◦ Reason: Legacy code needing refactor"
+	if !strings.Contains(output, expectedReason) {
+		t.Errorf("Expected output to contain package1 reason %q, got:\n%s", expectedReason, output)
 	}
 }
