@@ -131,6 +131,14 @@ func TestReporter_PrintSummary(t *testing.T) {
 			Status:   "❌ KO",
 		},
 		{
+			FilePath: "/tmp/project/src/WarnService.php", // Project
+			Status:   "⚠️  WARN",
+		},
+		{
+			FilePath: "/tmp/project/vendor/WarnBundle.php", // Vendor
+			Status:   "⚠️  WARN",
+		},
+		{
 			FilePath: "/tmp/project/src/Safe.php",
 			Status:   "✅ OK",
 		},
@@ -156,12 +164,37 @@ func TestReporter_PrintSummary(t *testing.T) {
 		"[VENDOR]  This is third-party code",
 		"max_requests",
 		"❌ KO (Dangerous State):     2 (Project: 1, Vendor: 1)",
+		"⚠️  WARN (Review reset):      2 (Project: 1, Vendor: 1)",
 	}
 
 	for _, exp := range expected {
 		if !strings.Contains(output, exp) {
 			t.Errorf("Expected summary to contain %q, but it didn't.\nOutput:\n%s", exp, output)
 		}
+	}
+
+	// Congratulation test
+	resultsAllSafe := []symbol.AuditStatus{
+		{
+			FilePath: "/tmp/project/src/Safe.php",
+			Status:   "✅ OK",
+		},
+	}
+
+	rOut3, wOut3, _ := os.Pipe()
+	os.Stdout = wOut3
+
+	r.PrintSummary(resultsAllSafe, projectRoot)
+
+	_ = wOut3.Close()
+	os.Stdout = old
+
+	var buf3 bytes.Buffer
+	_, _ = io.Copy(&buf3, rOut3)
+	output3 := stripANSI(buf3.String())
+
+	if !strings.Contains(output3, "CONGRATULATIONS: Your application and all its dependencies are compatible") {
+		t.Errorf("Expected congratulation message, got: %q", output3)
 	}
 }
 
@@ -248,4 +281,74 @@ func TestReporter_Headers(t *testing.T) {
 	jr.PrintHeader(42)
 	jr.PrintProjectHeader()
 	jr.PrintVendorHeader()
+}
+
+func TestReporter_PrintFindings_GitHub(t *testing.T) {
+	rep := NewReporter()
+	r := rep.(*CLIReporter)
+	r.IsGitHub = true
+	projectRoot := "/tmp/project"
+
+	res := symbol.AuditStatus{
+		ServiceID: "app.service",
+		FilePath:  "/tmp/project/src/Service.php",
+		Findings: []symbol.Finding{
+			{
+				Message:     "State mutation",
+				Code:        "$this->state = 1;",
+				Remediation: "Refactor me",
+				Severity:    "ERROR",
+				Line:        10,
+			},
+		},
+	}
+
+	// Capture stdout
+	old := os.Stdout
+	rOut, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	r.PrintFindings(res, projectRoot, false)
+
+	_ = wOut.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, rOut)
+	output := stripANSI(buf.String())
+
+	if !strings.Contains(output, "::error file=src/Service.php,line=10::[Igor] State mutation %0A 💡 Hint: Refactor me %0A 💡 Hint: Since this is your code, you should refactor this service to be stateless") {
+		t.Errorf("Expected GitHub actions error annotation, got: %q", output)
+	}
+
+	// Vendor warning
+	resVendor := symbol.AuditStatus{
+		ServiceID: "vendor.service",
+		FilePath:  "/tmp/project/vendor/bundle/Service.php",
+		Findings: []symbol.Finding{
+			{
+				Message:     "State mutation in vendor",
+				Code:        "self::$cache = [];",
+				Remediation: "",
+				Severity:    "WARNING",
+				Line:        20,
+			},
+		},
+	}
+
+	rOut2, wOut2, _ := os.Pipe()
+	os.Stdout = wOut2
+
+	r.PrintFindings(resVendor, projectRoot, true)
+
+	_ = wOut2.Close()
+	os.Stdout = old
+
+	var buf2 bytes.Buffer
+	_, _ = io.Copy(&buf2, rOut2)
+	output2 := stripANSI(buf2.String())
+
+	if !strings.Contains(output2, "::warning file=vendor/bundle/Service.php,line=20::[Igor] State mutation in vendor %0A 💡 Hint: This is third-party code.") {
+		t.Errorf("Expected GitHub actions warning annotation, got: %q", output2)
+	}
 }
