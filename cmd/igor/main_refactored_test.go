@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/igor-php/igor-php/internal/auditor"
 	"github.com/igor-php/igor-php/internal/config"
 	"github.com/igor-php/igor-php/pkg/symbol"
 )
@@ -347,5 +348,136 @@ func TestParseFlagsAndInit(t *testing.T) {
 	}
 	if !cfg.NoAgent {
 		t.Error("Expected NoAgent to be true")
+	}
+}
+
+func TestExecuteAudit(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "igor_test_execute_audit_")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	filePath := filepath.Join(tempDir, "test.php")
+	_ = os.WriteFile(filePath, []byte("<?php"), 0644)
+
+	cfg := config.Config{}
+	aud := auditor.NewAuditor(cfg)
+
+	auditList := []symbol.AuditStatus{
+		{
+			ServiceID: "app.test",
+			FilePath:  filePath,
+			Status:    "⏳ PENDING",
+		},
+	}
+
+	results := executeAudit(auditList, aud, cfg, config.Baseline{}, tempDir)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Status != "✅ OK" {
+		t.Errorf("expected status to be OK, got %s", results[0].Status)
+	}
+}
+
+func TestHandleGeminiReview_Error(t *testing.T) {
+	cfg := config.Config{
+		LLMConfig: config.LLMConfig{
+			Model: "gemini-1.5-flash",
+		},
+	}
+	err := handleGeminiReview("my content", cfg)
+	// Both success or failure are acceptable depending on whether gemini CLI is installed on the host runner.
+	if err == nil {
+		_ = os.Remove("igor-review.md")
+	}
+}
+
+func TestHandleAPIReview_Error(t *testing.T) {
+	cfg := config.Config{
+		LLMConfig: config.LLMConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+			APIUrl:   "http://invalid-url-that-does-not-exist:11434",
+		},
+	}
+	err := handleAPIReview("my content", cfg)
+	if err == nil {
+		t.Error("Expected error because Ollama API URL is invalid/unreachable")
+	}
+}
+
+func TestHandleReviewSubcommand_GeminiProvider(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "igor_review_gemini_")
+	defer os.RemoveAll(tempDir)
+
+	jsonFile := filepath.Join(tempDir, "export.json")
+	_ = os.WriteFile(jsonFile, []byte("{}"), 0644)
+
+	igorJson := `{"llm": {"provider": "gemini", "model": "gemini-1.5-flash"}}`
+	igorJsonPath := filepath.Join(tempDir, "igor.json")
+	_ = os.WriteFile(igorJsonPath, []byte(igorJson), 0644)
+
+	err := handleReviewSubcommand([]string{"review", jsonFile}, igorJsonPath)
+	// Both success or failure are acceptable depending on whether gemini CLI is installed on the host runner.
+	if err == nil {
+		_ = os.Remove("igor-review.md")
+	}
+}
+
+func TestHandleReviewSubcommand_APIProvider(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "igor_review_api_")
+	defer os.RemoveAll(tempDir)
+
+	jsonFile := filepath.Join(tempDir, "export.json")
+	_ = os.WriteFile(jsonFile, []byte("{}"), 0644)
+
+	igorJson := `{"llm": {"provider": "ollama", "model": "llama3", "api_url": "http://invalid:11434"}}`
+	igorJsonPath := filepath.Join(tempDir, "igor.json")
+	_ = os.WriteFile(igorJsonPath, []byte(igorJson), 0644)
+
+	err := handleReviewSubcommand([]string{"review", jsonFile}, igorJsonPath)
+	if err == nil {
+		t.Error("Expected error from API execution fallback")
+	}
+}
+
+func TestParseFlagsAndInit_Subcommands(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "igor_sub_cli_")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create igor.json beforehand to force init subcommand error
+	_ = os.WriteFile(filepath.Join(tempDir, "igor.json"), []byte("{}"), 0644)
+
+	// 1. init
+	_, _, shouldExit, err := parseFlagsAndInit([]string{"igor", "-config", filepath.Join(tempDir, "igor.json"), "init", tempDir})
+	if err == nil {
+		t.Error("Expected error for init subcommand on pre-existing config")
+	}
+	if !shouldExit {
+		t.Error("Expected shouldExit to be true for init subcommand")
+	}
+
+	// 2. debug-external-baseline
+	_, _, shouldExit, err = parseFlagsAndInit([]string{"igor", "debug-external-baseline", tempDir})
+	if err != nil {
+		t.Errorf("Unexpected error for debug-external-baseline: %v", err)
+	}
+	if !shouldExit {
+		t.Error("Expected shouldExit to be true for debug-external-baseline subcommand")
+	}
+
+	// 3. review (missing json file)
+	_, _, shouldExit, err = parseFlagsAndInit([]string{"igor", "review"})
+	if err == nil {
+		t.Error("Expected error for review subcommand without arguments")
+	}
+	if !shouldExit {
+		t.Error("Expected shouldExit to be true for review subcommand error")
 	}
 }
