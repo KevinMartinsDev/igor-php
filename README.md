@@ -3,6 +3,12 @@
   <img src="assets/igor-php.png" alt="Igor PHP Logo" width="600">
 </p>
 
+<p align="center">
+  <a href="https://codecov.io/gh/igor-php/igor-php">
+    <img src="https://codecov.io/gh/igor-php/igor-php/graph/badge.svg" alt="codecov" />
+  </a>
+</p>
+
 **The faithful assistant for your FrankenPHP Workers.**
 
 ⭐️ **If you find Igor useful, please consider leaving a star! It encourages us to keep maintaining and improving the project.**
