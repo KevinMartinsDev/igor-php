@@ -239,6 +239,26 @@ func TestHandleInitSubcommand_Error(t *testing.T) {
 	}
 }
 
+func TestHandleInitSubcommand_Success(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "igor_test_init_success_")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Initialize clean project - should default to generic project
+	err = handleInitSubcommand([]string{"init", tempDir}, "")
+	if err != nil {
+		t.Fatalf("Expected successful init, got error: %v", err)
+	}
+
+	// Verify that igor.json was created
+	configPath := filepath.Join(tempDir, "igor.json")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Errorf("Expected igor.json to be created in %s, but it doesn't exist", tempDir)
+	}
+}
+
 func TestHandleReviewSubcommand_Errors(t *testing.T) {
 	// Case 1: Missing JSON file
 	err := handleReviewSubcommand([]string{"review"}, "")
@@ -406,6 +426,39 @@ func TestHandleAPIReview_Error(t *testing.T) {
 	err := handleAPIReview("my content", cfg)
 	if err == nil {
 		t.Error("Expected error because Ollama API URL is invalid/unreachable")
+	}
+}
+
+func TestHandleAPIReview_OpenAIFallback(t *testing.T) {
+	// Expert mode with empty API Key env should print warning and exit cleanly (return nil)
+	cfg := config.Config{
+		LLMConfig: config.LLMConfig{
+			Provider:     "openai",
+			Model:        "gpt-4",
+			APIKeyEnv:    "IGOR_NON_EXISTENT_KEY_ENV",
+		},
+	}
+	// Make sure the env var is clean
+	_ = os.Unsetenv("IGOR_NON_EXISTENT_KEY_ENV")
+
+	err := handleAPIReview("my content", cfg)
+	if err != nil {
+		t.Errorf("Expected nil error for empty APIKeyEnv fallback, got: %v", err)
+	}
+}
+
+func TestHandleAPIReview_OllamaEmptyURL(t *testing.T) {
+	// Ollama with empty API URL should default to localhost and attempt request (failing due to unreachable connection)
+	cfg := config.Config{
+		LLMConfig: config.LLMConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+			APIUrl:   "", // forces fallback to default URL
+		},
+	}
+	err := handleAPIReview("my content", cfg)
+	if err == nil {
+		t.Error("Expected error because default localhost Ollama should be unreachable in tests")
 	}
 }
 
