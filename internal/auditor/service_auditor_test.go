@@ -197,3 +197,47 @@ func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
 		}
 	})
 }
+
+func TestAuditor_HelperMethods(t *testing.T) {
+	cfg := config.Config{
+		DevPackages: []string{"phpunit/phpunit", "friendsofphp/php-cs-fixer"},
+	}
+	a := NewAuditor(cfg)
+
+	// 1. Test IsDevPackagePath
+	t.Run("IsDevPackagePath matching cases", func(t *testing.T) {
+		if !a.IsDevPackagePath("vendor/phpunit/phpunit/src/Framework/TestCase.php") {
+			t.Error("Expected vendor/phpunit/phpunit path to match dev package")
+		}
+		if a.IsDevPackagePath("vendor/symfony/http-kernel/Kernel.php") {
+			t.Error("Expected vendor/symfony/http-kernel path NOT to match dev package")
+		}
+	})
+
+	// 2. Test IsDataPath
+	t.Run("IsDataPath matching cases", func(t *testing.T) {
+		sep := "/"
+		if !a.IsDataPath("src" + sep + "Entity" + sep + "User.php") {
+			t.Error("Expected Entity path to match data path")
+		}
+		if !a.IsDataPath("src" + sep + "DTO" + sep + "Request.php") {
+			t.Error("Expected DTO path to match data path")
+		}
+		if a.IsDataPath("src" + sep + "Service" + sep + "MyService.php") {
+			t.Error("Expected Service path NOT to match data path")
+		}
+	})
+
+	// 3. Test ExtractFQCN
+	t.Run("ExtractFQCN on StatelessService", func(t *testing.T) {
+		path := filepath.Join("..", "..", "test", "fixtures", "clean_code.php")
+		fqcn, err := a.ExtractFQCN(path)
+		if err != nil {
+			t.Fatalf("ExtractFQCN failed: %v", err)
+		}
+		expected := "App\\Service\\StatelessService"
+		if fqcn != expected {
+			t.Errorf("Expected FQCN to be %s, got %s", expected, fqcn)
+		}
+	})
+}

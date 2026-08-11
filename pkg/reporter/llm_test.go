@@ -78,6 +78,9 @@ func TestLLMReporter_HTMLEscape(t *testing.T) {
 		},
 	}
 	rep.PrintFindings(status, "/root", false)
+	rep.PrintHeader(0)
+	rep.PrintProjectHeader()
+	rep.PrintVendorHeader()
 
 	// Capture stdout
 	old := os.Stdout
