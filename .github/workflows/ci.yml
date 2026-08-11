@@ -65,5 +65,11 @@ jobs:
         with:
           php-version: ${{ matrix.php-version }}
           
-      - name: Run Tests with Race Detector
-        run: go test -race -v ./...
+      - name: Run Tests with Race Detector & Coverage
+        run: go test -race -v -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
