@@ -187,8 +187,24 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 	v.scanPropertyTypes(n)
 }
 
-func (v *PHPVisitor) scanReadonlyProps(classNode *sitter.Node) {
+func (v *PHPVisitor) getClassBody(classNode *sitter.Node) *sitter.Node {
+	if classNode == nil {
+		return nil
+	}
 	body := classNode.ChildByFieldName("body")
+	if body == nil {
+		for i := 0; i < int(classNode.ChildCount()); i++ {
+			child := classNode.Child(uint(i))
+			if child.Kind() == "declaration_list" {
+				return child
+			}
+		}
+	}
+	return body
+}
+
+func (v *PHPVisitor) scanReadonlyProps(classNode *sitter.Node) {
+	body := v.getClassBody(classNode)
 	if body == nil {
 		return
 	}
@@ -204,10 +220,19 @@ func (v *PHPVisitor) scanReadonlyProps(classNode *sitter.Node) {
 			nameNode := member.ChildByFieldName("name")
 			if nameNode != nil && strings.ToLower(v.getContent(nameNode)) == "__construct" {
 				params := member.ChildByFieldName("parameters")
+				if params == nil {
+					for i := 0; i < int(member.ChildCount()); i++ {
+						child := member.Child(uint(i))
+						if child.Kind() == "formal_parameters" {
+							params = child
+							break
+						}
+					}
+				}
 				if params != nil {
 					for j := uint(0); j < params.ChildCount(); j++ {
 						param := params.Child(j)
-						if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" {
+						if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" || param.Kind() == "simple_parameter" {
 							v.scanPropertyNode(param)
 						}
 					}
@@ -246,6 +271,7 @@ func (v *PHPVisitor) scanPropertyNode(n *sitter.Node) {
 						if isWorkerSafe {
 							v.workerSafeProps[propName] = true
 						}
+						v.declaredProps[propName] = true
 					}
 				}
 			}
@@ -261,6 +287,7 @@ func (v *PHPVisitor) scanPropertyNode(n *sitter.Node) {
 					if isWorkerSafe {
 						v.workerSafeProps[propName] = true
 					}
+					v.declaredProps[propName] = true
 					break
 				}
 			}
@@ -573,6 +600,15 @@ func (v *PHPVisitor) hasAttribute(n *sitter.Node, target string) bool {
 	}
 	attributesNode := n.ChildByFieldName("attributes")
 	if attributesNode == nil {
+		for i := 0; i < int(n.ChildCount()); i++ {
+			c := n.Child(uint(i))
+			if c.Kind() == "attribute_list" || c.Kind() == "attributes" {
+				attributesNode = c
+				break
+			}
+		}
+	}
+	if attributesNode == nil {
 		return false
 	}
 
@@ -840,7 +876,7 @@ func hasUseClause(node *sitter.Node) bool {
 
 // scanPropertyTypes recursively extracts type-hints of class properties and promoted constructor parameters.
 func (v *PHPVisitor) scanPropertyTypes(classNode *sitter.Node) {
-	body := classNode.ChildByFieldName("body")
+	body := v.getClassBody(classNode)
 	if body == nil {
 		return
 	}
@@ -884,11 +920,20 @@ func (v *PHPVisitor) handleConstructorDeclaration(member *sitter.Node) {
 	}
 	params := member.ChildByFieldName("parameters")
 	if params == nil {
+		for i := 0; i < int(member.ChildCount()); i++ {
+			child := member.Child(uint(i))
+			if child.Kind() == "formal_parameters" {
+				params = child
+				break
+			}
+		}
+	}
+	if params == nil {
 		return
 	}
 	for j := uint(0); j < params.ChildCount(); j++ {
 		param := params.Child(j)
-		if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" {
+		if param.Kind() == "parameter_declaration" || param.Kind() == "property_promotion_parameter" || param.Kind() == "simple_parameter" {
 			typeNode := param.ChildByFieldName("type")
 			var typeStr string
 			if typeNode != nil {

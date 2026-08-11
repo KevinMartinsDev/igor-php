@@ -79,10 +79,11 @@ func (c Config) IsExcluded(path string, rootPath string) bool {
 	if err != nil {
 		return false
 	}
+	rel = filepath.ToSlash(rel)
 	for _, ex := range c.Exclude {
-		// Normalize exclusion pattern by removing trailing slashes
-		ex = strings.TrimRight(ex, "/\\")
-		if rel == ex || strings.HasPrefix(rel, ex+string(os.PathSeparator)) || strings.HasPrefix(rel, ex+"/") {
+		// Normalize exclusion pattern by removing trailing slashes and converting separators to forward slashes
+		ex = filepath.ToSlash(strings.TrimRight(ex, "/\\"))
+		if rel == ex || strings.HasPrefix(rel, ex+"/") {
 			return true
 		}
 	}

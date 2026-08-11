@@ -210,3 +210,42 @@ func TestJSONReporter(t *testing.T) {
 		t.Errorf("Expected JSON to contain message, but it didn't.\nOutput:\n%s", output)
 	}
 }
+
+func TestReporter_Headers(t *testing.T) {
+	// 1. CLIReporter
+	rep := NewReporter()
+	r := rep.(*CLIReporter)
+
+	// Capture stdout
+	old := os.Stdout
+	rOut, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	r.PrintHeader(42)
+	r.PrintProjectHeader()
+	r.PrintVendorHeader()
+
+	_ = wOut.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, rOut)
+	output := stripANSI(buf.String())
+
+	if !strings.Contains(output, "Igor is auditing 42 unique shared service files") {
+		t.Errorf("Expected output to contain audit count header, got: %q", output)
+	}
+	if !strings.Contains(output, "PROJECT SERVICES") {
+		t.Errorf("Expected output to contain PROJECT SERVICES, got: %q", output)
+	}
+	if !strings.Contains(output, "VENDOR SERVICES") {
+		t.Errorf("Expected output to contain VENDOR SERVICES, got: %q", output)
+	}
+
+	// 2. JSONReporter (headers should be safe no-ops)
+	jsonRep := NewJSONReporter()
+	jr := jsonRep.(*JSONReporter)
+	jr.PrintHeader(42)
+	jr.PrintProjectHeader()
+	jr.PrintVendorHeader()
+}

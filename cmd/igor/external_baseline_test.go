@@ -286,7 +286,10 @@ func TestExternalBaseline_DebugSubcommand(t *testing.T) {
 	os.Stdout = w
 
 	// Run subcommand
-	handleDebugExternalBaselineSubcommand([]string{"debug-external-baseline", tmpDir}, "")
+	err := handleDebugExternalBaselineSubcommand([]string{"debug-external-baseline", tmpDir}, "")
+	if err != nil {
+		t.Fatalf("Unexpected error from handleDebugExternalBaselineSubcommand: %v", err)
+	}
 
 	// Restore stdout
 	w.Close()

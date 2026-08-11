@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -293,15 +294,21 @@ func TestPHPVisitor_TryFinallyCleanup(t *testing.T) {
 class AuthorizationChecker {
     private array $tokenStack = [];
     private array $accessDecisionStack = [];
+    private $someProp;
+    private $anotherProp;
 
     public function isGranted($attribute, $subject = null): bool
     {
         $this->accessDecisionStack[] = 'decision';
+        $this->someProp = 'someValue';
+        $this->anotherProp = 'anotherValue';
 
         try {
             return true;
         } finally {
             array_pop($this->accessDecisionStack);
+            $this->someProp = null;
+            unset($this->anotherProp);
         }
     }
 
@@ -720,5 +727,112 @@ class CachingHttpClient {
 	findings := v.Findings()
 	if len(findings) > 0 {
 		t.Errorf("Expected 0 findings inside safe namespace, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestPHPVisitor_StaticMutationAndDependencies(t *testing.T) {
+	code := `<?php
+class MyStaticService {
+    private static $cache;
+    public function set($v) {
+        self::$cache = $v;
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	
+	// Test SetDependencies
+	deps := []string{"App\\SomeDependency"}
+	v.SetDependencies(deps)
+
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	for _, f := range findings {
+		t.Logf("Found finding: Message=%q, Severity=%q, Deps=%v", f.Message, f.Severity, f.Dependencies)
+	}
+
+	if len(findings) == 0 {
+		t.Fatal("Expected at least one finding for static state mutation, got 0")
+	}
+
+	found := false
+	for _, f := range findings {
+		// Use strings.Contains to be resilient to exact message format
+		if strings.Contains(f.Message, "cache") {
+			found = true
+			// Verify dependency was attached
+			if len(f.Dependencies) != 1 || f.Dependencies[0] != "App\\SomeDependency" {
+				t.Errorf("Expected dependency 'App\\SomeDependency' in finding, got: %v", f.Dependencies)
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Expected a static state mutation finding for self::$cache")
+	}
+}
+
+func TestPHPVisitor_ConstructorPromotionAndAttributes(t *testing.T) {
+	code := `<?php
+class AdvancedService {
+    private string $normalProp;
+
+    public function __construct(
+        string $normalParam,
+        #[WorkerSafe]
+        private readonly string $promotedReadonlyProp,
+        private string $promotedProp
+    ) {
+        $this->normalProp = $normalParam;
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	
+	var classNode *sitter.Node
+	for i := uint(0); i < tree.RootNode().ChildCount(); i++ {
+		child := tree.RootNode().Child(i)
+		if child.Kind() == "class_declaration" {
+			classNode = child
+			break
+		}
+	}
+
+	if classNode != nil {
+		v.handleClass(classNode)
+	}
+
+	// Verify property types and declarations were extracted correctly
+	if tType, ok := v.propertyTypes["promotedReadonlyProp"]; !ok || tType != "string" {
+		t.Errorf("Expected promotedReadonlyProp to have type 'string', got: %s", tType)
+	}
+	if tType, ok := v.propertyTypes["promotedProp"]; !ok || tType != "string" {
+		t.Errorf("Expected promotedProp to have type 'string', got: %s", tType)
+	}
+	if !v.declaredProps["promotedProp"] {
+		t.Error("Expected promotedProp to be registered as declared")
+	}
+	if !v.readonlyProps["promotedReadonlyProp"] {
+		t.Error("Expected promotedReadonlyProp to be registered as readonly")
+	}
+	if !v.workerSafeProps["promotedReadonlyProp"] {
+		t.Error("Expected promotedReadonlyProp to be registered as WorkerSafe")
 	}
 }

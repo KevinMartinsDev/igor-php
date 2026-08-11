@@ -1,0 +1,13 @@
+# Codecov configuration
+comment: false
+
+coverage:
+  ignore:
+    - "cmd/igor/main.go"
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
