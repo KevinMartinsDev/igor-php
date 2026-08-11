@@ -146,6 +146,11 @@ func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
 		Aliases: map[string]interface{}{
 			"App\\Translator\\TranslatorInterface": ".abstract.instanceof.App\\Translator\\MyTranslator",
 			"App\\Service\\NonSharedInterface":     "App\\Service\\NonSharedService",
+			"App\\Service\\MapServiceAlias":       map[string]interface{}{"service": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapIdAlias":            map[string]interface{}{"id": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapTargetAlias":        map[string]interface{}{"target": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapInvalidAlias":       map[string]interface{}{"invalid": "App\\Service\\NonSharedService"},
+			"App\\Service\\InvalidTypeAlias":      123,
 		},
 	}
 
@@ -191,6 +196,36 @@ func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
 		}
 	})
 
+	t.Run("IsExplicitlyNonShared with map service alias", func(t *testing.T) {
+		if !a.IsExplicitlyNonShared("App\\Service\\MapServiceAlias") {
+			t.Error("Expected MapServiceAlias to resolve to non-shared service")
+		}
+	})
+
+	t.Run("IsExplicitlyNonShared with map id alias", func(t *testing.T) {
+		if !a.IsExplicitlyNonShared("App\\Service\\MapIdAlias") {
+			t.Error("Expected MapIdAlias to resolve to non-shared service")
+		}
+	})
+
+	t.Run("IsExplicitlyNonShared with map target alias", func(t *testing.T) {
+		if !a.IsExplicitlyNonShared("App\\Service\\MapTargetAlias") {
+			t.Error("Expected MapTargetAlias to resolve to non-shared service")
+		}
+	})
+
+	t.Run("IsExplicitlyNonShared with map invalid alias", func(t *testing.T) {
+		if a.IsExplicitlyNonShared("App\\Service\\MapInvalidAlias") {
+			t.Error("Expected MapInvalidAlias to fail to resolve")
+		}
+	})
+
+	t.Run("IsExplicitlyNonShared with invalid type alias", func(t *testing.T) {
+		if a.IsExplicitlyNonShared("App\\Service\\InvalidTypeAlias") {
+			t.Error("Expected InvalidTypeAlias to fail to resolve")
+		}
+	})
+
 	t.Run("IsExplicitlyNonShared on shared service", func(t *testing.T) {
 		if a.IsExplicitlyNonShared("App\\Translator\\MyTranslator") {
 			t.Error("Expected shared MyTranslator to not be explicitly non-shared")
@@ -200,7 +235,8 @@ func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
 
 func TestAuditor_HelperMethods(t *testing.T) {
 	cfg := config.Config{
-		DevPackages: []string{"phpunit/phpunit", "friendsofphp/php-cs-fixer"},
+		DevPackages:    []string{"phpunit/phpunit", "friendsofphp/php-cs-fixer"},
+		SafeNamespaces: []string{"\\Symfony\\Component\\", "App\\Safe\\"},
 	}
 	a := NewAuditor(cfg)
 
@@ -238,6 +274,22 @@ func TestAuditor_HelperMethods(t *testing.T) {
 		expected := "App\\Service\\StatelessService"
 		if fqcn != expected {
 			t.Errorf("Expected FQCN to be %s, got %s", expected, fqcn)
+		}
+	})
+
+	// 4. Test IsSafeNamespace
+	t.Run("IsSafeNamespace cases", func(t *testing.T) {
+		if !a.IsSafeNamespace("Symfony\\Component\\HttpClient\\CachingHttpClient") {
+			t.Error("Expected Symfony\\Component\\HttpClient\\CachingHttpClient to be in a safe namespace")
+		}
+		if !a.IsSafeNamespace("\\Symfony\\Component\\HttpClient\\CachingHttpClient") {
+			t.Error("Expected absolute path namespace to be safe")
+		}
+		if !a.IsSafeNamespace("App\\Safe\\Helper") {
+			t.Error("Expected App\\Safe\\Helper to be safe")
+		}
+		if a.IsSafeNamespace("App\\Unsafe\\Helper") {
+			t.Error("Expected App\\Unsafe\\Helper NOT to be safe")
 		}
 	})
 }

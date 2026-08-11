@@ -836,3 +836,75 @@ class AdvancedService {
 		t.Error("Expected promotedReadonlyProp to be registered as WorkerSafe")
 	}
 }
+
+func TestPHPVisitor_EdgeCases(t *testing.T) {
+	// 1. Test resolveFQCN
+	t.Run("resolveFQCN cases", func(t *testing.T) {
+		v := &PHPVisitor{
+			lines: []string{
+				"use App\\Service\\FooService as Foo;",
+				"use App\\Service\\BarService;",
+			},
+			namespace: "App\\Controller",
+		}
+
+		// Absolute FQCN
+		if res := v.resolveFQCN("\\Some\\Absolute\\Class"); res != "Some\\Absolute\\Class" {
+			t.Errorf("Expected Some\\Absolute\\Class, got %s", res)
+		}
+
+		// Alias import
+		if res := v.resolveFQCN("Foo"); res != "App\\Service\\FooService" {
+			t.Errorf("Expected App\\Service\\FooService, got %s", res)
+		}
+
+		// Direct import
+		if res := v.resolveFQCN("BarService"); res != "App\\Service\\BarService" {
+			t.Errorf("Expected App\\Service\\BarService, got %s", res)
+		}
+
+		// Fallback to namespace
+		if res := v.resolveFQCN("MyController"); res != "App\\Controller\\MyController" {
+			t.Errorf("Expected App\\Controller\\MyController, got %s", res)
+		}
+
+		// Fallback without namespace
+		vNoNS := &PHPVisitor{}
+		if res := vNoNS.resolveFQCN("MyClass"); res != "MyClass" {
+			t.Errorf("Expected MyClass, got %s", res)
+		}
+	})
+
+	// 2. Test getClassBody nil check
+	t.Run("getClassBody with nil node", func(t *testing.T) {
+		v := &PHPVisitor{}
+		if res := v.getClassBody(nil); res != nil {
+			t.Error("Expected nil body for nil class node")
+		}
+	})
+
+	// 3. Test isSuperglobal for other variables
+	t.Run("isSuperglobal other cases", func(t *testing.T) {
+		if isSuperglobal("$this") {
+			t.Error("Expected $this to not be a superglobal")
+		}
+		if !isSuperglobal("$_GET") {
+			t.Error("Expected $_GET to be a superglobal")
+		}
+	})
+
+	// 4. Test handleFunctionCall nil safety
+	t.Run("handleFunctionCall nil safety", func(t *testing.T) {
+		v := &PHPVisitor{}
+		// If n has no children, ChildByFieldName returns nil, which should exit early
+		code := `<?php ;`
+		content := []byte(code)
+		p := sitter.NewParser()
+		_ = p.SetLanguage(sitter.NewLanguage(php.LanguagePHP()))
+		tree := p.Parse(content, nil)
+		defer tree.Close()
+
+		// A non-function-call node passed to handleFunctionCall should just return safely
+		v.handleFunctionCall(tree.RootNode())
+	})
+}
