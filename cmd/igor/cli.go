@@ -10,7 +10,7 @@ import (
 	"github.com/igor-php/igor-php/internal/config"
 )
 
-func parseFlagsAndInit() (config.Config, string, bool) {
+func parseFlagsAndInit() (config.Config, string, bool, error) {
 	binName = filepath.Base(os.Args[0])
 	if strings.HasPrefix(binName, "main") || strings.HasPrefix(binName, "exe") {
 		binName = "igor"
@@ -57,27 +57,27 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 
 	if *versionFlag {
 		fmt.Fprintf(os.Stderr, "%s version %s\n", binName, Version)
-		return config.Config{}, "", true
+		return config.Config{}, "", true, nil
 	}
 
 	args := flag.Args()
 	if len(args) > 0 {
 		switch args[0] {
 		case "init":
-			handleInitSubcommand(args, configPath)
-			return config.Config{}, "", true
+			err := handleInitSubcommand(args, configPath)
+			return config.Config{}, "", true, err
 		case "review":
-			handleReviewSubcommand(args, configPath)
-			return config.Config{}, "", true
+			err := handleReviewSubcommand(args, configPath)
+			return config.Config{}, "", true, err
 		case "debug-external-baseline":
-			handleDebugExternalBaselineSubcommand(args, configPath)
-			return config.Config{}, "", true
+			err := handleDebugExternalBaselineSubcommand(args, configPath)
+			return config.Config{}, "", true, err
 		}
 	}
 
 	if len(args) < 1 {
 		flag.Usage()
-		os.Exit(1)
+		return config.Config{}, "", true, fmt.Errorf("missing target directory to audit")
 	}
 	rootPath, _ := filepath.Abs(args[0])
 
@@ -93,7 +93,7 @@ func parseFlagsAndInit() (config.Config, string, bool) {
 		}
 	}
 
-	return cfg, rootPath, false
+	return cfg, rootPath, false, nil
 }
 
 func applyFlagOverrides(cfg *config.Config, consoleFlag, envFlag *string, verboseFlag, noAgentFlag *bool, outputFlag *string, generateBaselineFlag *bool, baselineFlag, containerDumpFlag *string, ignoreExternalBaselineFlag *bool, checkBaselineFlag, pruneBaselineFlag *bool) {

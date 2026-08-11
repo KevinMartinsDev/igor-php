@@ -110,16 +110,16 @@ func runParallelAudit(auditList []symbol.AuditStatus, aud *auditor.Auditor) <-ch
 	return resultsChan
 }
 
-func detectSymfonyProject(rootPath string, cfg config.Config) *auditor.SymfonyBridge {
+func detectSymfonyProject(rootPath string, cfg config.Config) (*auditor.SymfonyBridge, error) {
 	sb, err := auditor.DetectSymfony(rootPath, cfg)
 	if err != nil {
 		if cfg.NoAgent {
 			fmt.Fprintf(os.Stderr, "⚠️  Warning: Symfony Deep Audit disabled: %v\n", err)
 			fmt.Fprintln(os.Stderr, "   Falling back to standard directory scan.")
+			return nil, nil
 		} else {
-			fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
-			os.Exit(1)
+			return nil, err
 		}
 	}
-	return sb
+	return sb, nil
 }

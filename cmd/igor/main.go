@@ -13,7 +13,11 @@ var Version = "dev"
 var binName = "igor"
 
 func main() {
-	cfg, rootPath, shouldExit := parseFlagsAndInit()
+	cfg, rootPath, shouldExit, err := parseFlagsAndInit()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
+		os.Exit(1)
+	}
 	if shouldExit {
 		return
 	}
@@ -26,7 +30,12 @@ func main() {
 	aud.NonSharedServices = loadContainerDump(rootPath, cfg)
 
 	// 2. Detect Symfony project
-	aud.Symfony = detectSymfonyProject(rootPath, cfg)
+	symfony, err := detectSymfonyProject(rootPath, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
+		os.Exit(1)
+	}
+	aud.Symfony = symfony
 
 	// 3. Load Baseline
 	baseline := loadAuditBaseline(rootPath, &cfg)
@@ -84,7 +93,11 @@ func main() {
 
 	// 7. Handle Baseline Generation
 	if cfg.GenerateBaseline {
-		generateBaselineFile(rootPath, cfg, results)
+		err := generateBaselineFile(rootPath, cfg, results)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

@@ -232,16 +232,16 @@ func isAbsPath(path string) bool {
 	return false
 }
 
-func generateBaselineFile(rootPath string, cfg config.Config, results []symbol.AuditStatus) {
+func generateBaselineFile(rootPath string, cfg config.Config, results []symbol.AuditStatus) error {
 	baselineFile := cfg.BaselinePath
 	if !filepath.IsAbs(baselineFile) {
 		baselineFile = filepath.Join(rootPath, baselineFile)
 	}
 	err := config.SaveBaseline(baselineFile, results, rootPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error saving baseline: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error saving baseline: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "\n✨ Baseline successfully generated at: %s\n", baselineFile)
 	fmt.Fprintln(os.Stderr, "👉 Future audits will ignore these existing findings.")
+	return nil
 }

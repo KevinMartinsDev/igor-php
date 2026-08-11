@@ -11,7 +11,7 @@ import (
 	"github.com/igor-php/igor-php/pkg/reporter"
 )
 
-func handleInitSubcommand(args []string, configPath string) {
+func handleInitSubcommand(args []string, configPath string) error {
 	targetDir := "."
 	if len(args) > 1 {
 		targetDir = args[1]
@@ -19,8 +19,7 @@ func handleInitSubcommand(args []string, configPath string) {
 	rootPath, _ := filepath.Abs(targetDir)
 	detectedType, err := config.InitConfig(rootPath, configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	actualConfigPath := configPath
@@ -32,19 +31,17 @@ func handleInitSubcommand(args []string, configPath string) {
 	fmt.Fprintf(os.Stderr, "📂 Detected project type: %s\n", detectedType)
 	fmt.Fprintf(os.Stderr, "📝 Configuration saved to: %s\n", actualConfigPath)
 	fmt.Fprintf(os.Stderr, "👉 You can now customize the configuration to fit your needs.\n")
+	return nil
 }
 
-func handleReviewSubcommand(args []string, configPath string) {
+func handleReviewSubcommand(args []string, configPath string) error {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "❌ Error: missing JSON file to review.")
-		fmt.Fprintf(os.Stderr, "Usage: %s review <json_file>\n", binName)
-		os.Exit(1)
+		return fmt.Errorf("missing JSON file to review.\nUsage: %s review <json_file>", binName)
 	}
 	jsonFile := args[1]
 	content, err := os.ReadFile(jsonFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error: could not read file %s: %v\n", jsonFile, err)
-		os.Exit(1)
+		return fmt.Errorf("could not read file %s: %w", jsonFile, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "🧟 Igor is preparing to review %s...\n", jsonFile)
@@ -53,26 +50,23 @@ func handleReviewSubcommand(args []string, configPath string) {
 	cfg := config.LoadConfig(rootPath, configPath)
 
 	if cfg.LLMConfig.Provider == "gemini" {
-		handleGeminiReview(string(content), cfg)
-		os.Exit(0)
+		return handleGeminiReview(string(content), cfg)
 	}
 
 	if cfg.LLMConfig.Provider == "ollama" || (cfg.LLMConfig.Provider == "openai" && cfg.LLMConfig.APIUrl != "") {
-		handleAPIReview(string(content), cfg)
-		os.Exit(0)
+		return handleAPIReview(string(content), cfg)
 	}
 
 	err = reporter.GenerateFrictionlessPrompt(string(content))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	fmt.Fprintln(os.Stderr, "📄 Prompt ready! Copy the content of igor-review-prompt.md to your favorite LLM.")
-	os.Exit(0)
+	return nil
 }
 
-func handleGeminiReview(content string, cfg config.Config) {
+func handleGeminiReview(content string, cfg config.Config) error {
 	fmt.Fprintln(os.Stderr, "🤖 Gemini CLI Mode: Sending audit to Gemini...")
 	prompt := fmt.Sprintf(reporter.FrictionlessPromptTemplate, content)
 
@@ -88,20 +82,19 @@ func handleGeminiReview(content string, cfg config.Config) {
 
 	err := cmd.Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Gemini CLI failed: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Gemini CLI failed: %w", err)
 	}
 
 	err = os.WriteFile("igor-review.md", out.Bytes(), 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error writing review file: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error writing review file: %w", err)
 	}
 
 	fmt.Fprintln(os.Stderr, "✨ Gemini Review complete! Results saved to igor-review.md")
+	return nil
 }
 
-func handleAPIReview(content string, cfg config.Config) {
+func handleAPIReview(content string, cfg config.Config) error {
 	apiURL := cfg.LLMConfig.APIUrl
 	apiKey := ""
 	modeName := "Expert Mode"
@@ -116,7 +109,7 @@ func handleAPIReview(content string, cfg config.Config) {
 		apiKey = os.Getenv(cfg.LLMConfig.APIKeyEnv)
 		if apiKey == "" {
 			fmt.Fprintf(os.Stderr, "⚠️  Expert Mode enabled but ENV %s is empty. Falling back to Frictionless Mode.\n", cfg.LLMConfig.APIKeyEnv)
-			return
+			return nil
 		}
 	}
 
@@ -126,21 +119,19 @@ func handleAPIReview(content string, cfg config.Config) {
 	prompt := fmt.Sprintf(reporter.FrictionlessPromptTemplate, content)
 	review, err := client.Review(prompt)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ %s failed: %v\n", modeName, err)
-		os.Exit(1)
+		return fmt.Errorf("%s failed: %w", modeName, err)
 	}
 
 	err = os.WriteFile("igor-review.md", []byte(review), 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error writing review file: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error writing review file: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "✨ %s Review complete! Results saved to igor-review.md\n", modeName)
-	os.Exit(0)
+	return nil
 }
 
-func handleDebugExternalBaselineSubcommand(args []string, configPath string) {
+func handleDebugExternalBaselineSubcommand(args []string, configPath string) error {
 	targetDir := "."
 	if len(args) > 1 {
 		targetDir = args[1]
@@ -158,7 +149,7 @@ func handleDebugExternalBaselineSubcommand(args []string, configPath string) {
 	fmt.Println("\n📋 Summary of loaded baseline files:")
 	if len(baseline.Files) == 0 {
 		fmt.Println("   No baseline files or entries found.")
-		return
+		return nil
 	}
 
 	for relPath, entries := range baseline.Files {
@@ -170,4 +161,5 @@ func handleDebugExternalBaselineSubcommand(args []string, configPath string) {
 			}
 		}
 	}
+	return nil
 }
