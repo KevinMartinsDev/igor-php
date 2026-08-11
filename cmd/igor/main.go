@@ -13,7 +13,7 @@ var Version = "dev"
 var binName = "igor"
 
 func main() {
-	cfg, rootPath, shouldExit, err := parseFlagsAndInit()
+	cfg, rootPath, shouldExit, err := parseFlagsAndInit(os.Args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
 		os.Exit(1)

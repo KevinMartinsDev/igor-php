@@ -289,3 +289,63 @@ func TestCollectForcedVendorFiles(t *testing.T) {
 		t.Errorf("Expected discovered path to be %s, got %s", expectedPath, actualPath)
 	}
 }
+
+func TestParseFlagsAndInit(t *testing.T) {
+	// 1. Version flag
+	_, _, shouldExit, err := parseFlagsAndInit([]string{"igor", "--version"})
+	if err != nil {
+		t.Errorf("Unexpected error for --version: %v", err)
+	}
+	if !shouldExit {
+		t.Error("Expected shouldExit to be true for --version")
+	}
+
+	// 2. Missing target directory
+	_, _, shouldExit, err = parseFlagsAndInit([]string{"igor"})
+	if err == nil {
+		t.Error("Expected error when target directory is missing")
+	} else if !strings.Contains(err.Error(), "missing target directory") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if !shouldExit {
+		t.Error("Expected shouldExit to be true when target directory is missing")
+	}
+
+	// 3. Valid directory with flag overrides
+	tempDir, err := os.MkdirTemp("", "igor_test_cli_parse_")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfg, rootPath, shouldExit, err := parseFlagsAndInit([]string{
+		"igor",
+		"--output", "json",
+		"--env", "prod",
+		"--verbose",
+		"--no-agent",
+		tempDir,
+	})
+
+	if err != nil {
+		t.Fatalf("Unexpected error for valid arguments: %v", err)
+	}
+	if shouldExit {
+		t.Error("Expected shouldExit to be false for valid audit arguments")
+	}
+	if filepath.Clean(rootPath) != filepath.Clean(tempDir) {
+		t.Errorf("Expected rootPath to be %s, got %s", tempDir, rootPath)
+	}
+	if cfg.OutputFormat != "json" {
+		t.Errorf("Expected OutputFormat to be json, got %s", cfg.OutputFormat)
+	}
+	if cfg.Env != "prod" {
+		t.Errorf("Expected Env to be prod, got %s", cfg.Env)
+	}
+	if !cfg.Verbose {
+		t.Error("Expected Verbose to be true")
+	}
+	if !cfg.NoAgent {
+		t.Error("Expected NoAgent to be true")
+	}
+}

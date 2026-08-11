@@ -10,29 +10,32 @@ import (
 	"github.com/igor-php/igor-php/internal/config"
 )
 
-func parseFlagsAndInit() (config.Config, string, bool, error) {
-	binName = filepath.Base(os.Args[0])
+func parseFlagsAndInit(args []string) (config.Config, string, bool, error) {
+	binName = filepath.Base(args[0])
 	if strings.HasPrefix(binName, "main") || strings.HasPrefix(binName, "exe") {
 		binName = "igor"
 	}
 
-	var configPath string
-	versionFlag := flag.Bool("version", false, "Display version information")
-	flag.StringVar(&configPath, "config", "", "Custom path to igor.json")
-	flag.StringVar(&configPath, "c", "", "Custom path to igor.json (shorthand)")
-	baselineFlag := flag.String("baseline", "", "Path to baseline file")
-	generateBaselineFlag := flag.Bool("generate-baseline", false, "Generate a baseline file from current findings")
-	checkBaselineFlag := flag.Bool("check-baseline", false, "Verify if the baseline is clean (fails if any baseline entries are no longer detected)")
-	pruneBaselineFlag := flag.Bool("prune-baseline", false, "Remove stale entries from the baseline automatically")
-	consoleFlag := flag.String("console", "", "Custom path to Symfony console (e.g. app/console)")
-	envFlag := flag.String("env", "", "Symfony environment (default: dev)")
-	verboseFlag := flag.Bool("verbose", false, "Enable verbose output to see skipped services and details")
-	noAgentFlag := flag.Bool("no-agent", false, "Disable Igor Agent and fallback to standard scan")
-	outputFlag := flag.String("output", "cli", "Output format (cli, llm, json)")
-	containerDumpFlag := flag.String("container-dump", "", "Path to a generic container dump JSON ({\"services\":[{\"class\":...,\"shared\":bool}]}) used to skip transient (non-shared) classes")
-	ignoreExternalBaselineFlag := flag.Bool("ignore-external-baseline", false, "Ignore baseline files defined in external vendor packages")
+	fs := flag.NewFlagSet(binName, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 
-	flag.Usage = func() {
+	var configPath string
+	versionFlag := fs.Bool("version", false, "Display version information")
+	fs.StringVar(&configPath, "config", "", "Custom path to igor.json")
+	fs.StringVar(&configPath, "c", "", "Custom path to igor.json (shorthand)")
+	baselineFlag := fs.String("baseline", "", "Path to baseline file")
+	generateBaselineFlag := fs.Bool("generate-baseline", false, "Generate a baseline file from current findings")
+	checkBaselineFlag := fs.Bool("check-baseline", false, "Verify if the baseline is clean (fails if any baseline entries are no longer detected)")
+	pruneBaselineFlag := fs.Bool("prune-baseline", false, "Remove stale entries from the baseline automatically")
+	consoleFlag := fs.String("console", "", "Custom path to Symfony console (e.g. app/console)")
+	envFlag := fs.String("env", "", "Symfony environment (default: dev)")
+	verboseFlag := fs.Bool("verbose", false, "Enable verbose output to see skipped services and details")
+	noAgentFlag := fs.Bool("no-agent", false, "Disable Igor Agent and fallback to standard scan")
+	outputFlag := fs.String("output", "cli", "Output format (cli, llm, json)")
+	containerDumpFlag := fs.String("container-dump", "", "Path to a generic container dump JSON ({\"services\":[{\"class\":...,\"shared\":bool}]}) used to skip transient (non-shared) classes")
+	ignoreExternalBaselineFlag := fs.Bool("ignore-external-baseline", false, "Ignore baseline files defined in external vendor packages")
+
+	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "🧟 Igor-PHP v%s - The faithful assistant for FrankenPHP Workers\n\n", Version)
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  %s [options] <directory>    Audit a project\n", binName)
@@ -40,7 +43,7 @@ func parseFlagsAndInit() (config.Config, string, bool, error) {
 		fmt.Fprintf(os.Stderr, "  %s review <json_file>       Review an audit JSON export with an LLM\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s debug-external-baseline [directory] List all discovered vendor baselines in the project\n\n", binName)
 		fmt.Fprintf(os.Stderr, "Options:\n")
-		flag.PrintDefaults()
+		fs.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  %s .\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s --output json .\n", binName)
@@ -53,33 +56,36 @@ func parseFlagsAndInit() (config.Config, string, bool, error) {
 		fmt.Fprintf(os.Stderr, "  %s --env stage --verbose ./my-project\n", binName)
 	}
 
-	flag.Parse()
+	err := fs.Parse(args[1:])
+	if err != nil {
+		return config.Config{}, "", true, err
+	}
 
 	if *versionFlag {
 		fmt.Fprintf(os.Stderr, "%s version %s\n", binName, Version)
 		return config.Config{}, "", true, nil
 	}
 
-	args := flag.Args()
-	if len(args) > 0 {
-		switch args[0] {
+	parsedArgs := fs.Args()
+	if len(parsedArgs) > 0 {
+		switch parsedArgs[0] {
 		case "init":
-			err := handleInitSubcommand(args, configPath)
+			err := handleInitSubcommand(parsedArgs, configPath)
 			return config.Config{}, "", true, err
 		case "review":
-			err := handleReviewSubcommand(args, configPath)
+			err := handleReviewSubcommand(parsedArgs, configPath)
 			return config.Config{}, "", true, err
 		case "debug-external-baseline":
-			err := handleDebugExternalBaselineSubcommand(args, configPath)
+			err := handleDebugExternalBaselineSubcommand(parsedArgs, configPath)
 			return config.Config{}, "", true, err
 		}
 	}
 
-	if len(args) < 1 {
-		flag.Usage()
+	if len(parsedArgs) < 1 {
+		fs.Usage()
 		return config.Config{}, "", true, fmt.Errorf("missing target directory to audit")
 	}
-	rootPath, _ := filepath.Abs(args[0])
+	rootPath, _ := filepath.Abs(parsedArgs[0])
 
 	cfg := config.LoadConfig(rootPath, configPath)
 	applyFlagOverrides(&cfg, consoleFlag, envFlag, verboseFlag, noAgentFlag, outputFlag, generateBaselineFlag, baselineFlag, containerDumpFlag, ignoreExternalBaselineFlag, checkBaselineFlag, pruneBaselineFlag)
