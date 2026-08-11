@@ -27,6 +27,12 @@ func (m *mockEngine) IsSafeNamespace(_ string) bool {
 }
 
 func (m *mockEngine) IsResettable(className string) bool {
+	lower := strings.ToLower(className)
+	if strings.Contains(lower, "doctrine\\orm\\entitymanager") ||
+		strings.Contains(lower, "doctrine\\persistence\\objectmanager") ||
+		strings.Contains(lower, "doctrine\\odm\\mongodb\\documentmanager") {
+		return true
+	}
 	return className == "Xynnn\\GoogleTagManagerBundle\\Service\\GoogleTagManagerInterface" || className == "App\\Service\\ResettableService"
 }
 
@@ -907,4 +913,70 @@ func TestPHPVisitor_EdgeCases(t *testing.T) {
 		// A non-function-call node passed to handleFunctionCall should just return safely
 		v.handleFunctionCall(tree.RootNode())
 	})
+}
+
+func TestPHPVisitor_DoctrineEntityManager_Lifecycle(t *testing.T) {
+	code := `<?php
+class DoctrineService {
+    private \Doctrine\ORM\EntityManagerInterface $em;
+
+    public function __construct(\Doctrine\ORM\EntityManagerInterface $em) {
+        $this->em = $em;
+    }
+
+    public function testRemove($product) {
+        $this->em->remove($product); // Safe, whitelisted direct call
+    }
+
+    public function testClear() {
+        $this->em->clear(); // Safe, whitelisted direct call
+    }
+
+    public function testSetConfiguration($config) {
+        $this->em->setConfiguration($config); // Unsafe: direct call but NOT on UnitOfWork whitelist
+    }
+
+    public function testChainedDisable() {
+        $this->em->getFilters()->disable('softdeleteable'); // Unsafe: chained mutation call
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+
+	// We expect exactly 2 findings:
+	// 1 for setConfiguration
+	// 1 for disable ('softdeleteable') called in a chained way
+	if len(findings) != 2 {
+		t.Fatalf("Expected exactly 2 findings, got %d: %v", len(findings), findings)
+	}
+
+	foundSetConfiguration := false
+	foundChainedDisable := false
+
+	for _, f := range findings {
+		if strings.Contains(f.Snippet, "setConfiguration") {
+			foundSetConfiguration = true
+		}
+		if strings.Contains(f.Snippet, "disable") {
+			foundChainedDisable = true
+		}
+	}
+
+	if !foundSetConfiguration {
+		t.Error("Expected a finding for setConfiguration on EntityManager")
+	}
+	if !foundChainedDisable {
+		t.Error("Expected a finding for chained disable call on EntityManager filters")
+	}
 }

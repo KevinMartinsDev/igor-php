@@ -705,7 +705,16 @@ func (v *PHPVisitor) detectSingletonMutation(n *sitter.Node, propName, methodNam
 	if typeName, ok := v.propertyTypes[propName]; ok {
 		fqcn := v.resolveFQCN(typeName)
 		if v.engine != nil && v.engine.IsResettable(fqcn) {
-			isResettable = true
+			if isDoctrineManager(fqcn) {
+				obj := n.ChildByFieldName("object")
+				if obj != nil && v.isDirectReference(obj) && isUnitOfWorkLifecycleMethod(methodName) {
+					isResettable = true
+				} else {
+					isResettable = false
+				}
+			} else {
+				isResettable = true
+			}
 		}
 	}
 
@@ -746,6 +755,40 @@ func (v *PHPVisitor) detectClosureStateLeak(n *sitter.Node) {
 		}
 	}
 	findClosures(argsNode)
+}
+
+func isDoctrineManager(className string) bool {
+	normalized := strings.ReplaceAll(className, "/", "\\")
+	normalized = strings.TrimPrefix(normalized, "\\")
+	lower := strings.ToLower(normalized)
+	return strings.Contains(lower, "doctrine\\orm\\entitymanager") ||
+		strings.Contains(lower, "doctrine\\persistence\\objectmanager") ||
+		strings.Contains(lower, "doctrine\\odm\\mongodb\\documentmanager")
+}
+
+func isUnitOfWorkLifecycleMethod(methodName string) bool {
+	switch methodName {
+	case "persist", "remove", "flush", "clear", "refresh", "detach", "merge":
+		return true
+	}
+	return false
+}
+
+func (v *PHPVisitor) isDirectReference(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+	if _, ok := v.isPropertyFetchOnThis(n); ok {
+		return true
+	}
+	kind := n.Kind()
+	if kind == "variable" || kind == "variable_name" {
+		content := v.getContent(n)
+		if strings.HasPrefix(content, "$") && v.localSharedVars[content] {
+			return true
+		}
+	}
+	return false
 }
 
 // isPropertyFetchOnThis checks if a node is a property of the current class via $this (e.g., $this->propertyName)
