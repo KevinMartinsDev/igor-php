@@ -1,0 +1,4 @@
+# Codecov configuration
+coverage:
+  ignore:
+    - "cmd/igor/main.go"
