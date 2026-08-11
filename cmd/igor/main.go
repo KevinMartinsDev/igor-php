@@ -229,23 +229,62 @@ func discoverVendorPackages(vendorDir, vName string, cfg *config.Config, baselin
 }
 
 func loadAndMergePackageBaseline(packagePath, vName, pName string, isSymlink bool, cfg config.Config, baseline *config.Baseline) int {
-	configPath := filepath.Join(packagePath, "igor.json")
+	configCandidates := []string{
+		"igor.json",
+		filepath.Join("config", "ci", "igor.json"),
+		filepath.Join("config", "igor.json"),
+		filepath.Join(".github", "igor.json"),
+	}
+
+	var configPath string
+	for _, c := range configCandidates {
+		p := filepath.Join(packagePath, c)
+		if _, err := os.Stat(p); err == nil {
+			configPath = p
+			break
+		}
+	}
+
 	var baselinePath string
 
-	if _, err := os.Stat(configPath); err == nil {
+	if configPath != "" {
 		pkgCfg := config.LoadConfig(packagePath, configPath)
 		if pkgCfg.BaselinePath != "" {
 			baselinePath = pkgCfg.BaselinePath
-			if !filepath.IsAbs(baselinePath) {
-				baselinePath = filepath.Join(packagePath, baselinePath)
+			if !isAbsPath(baselinePath) {
+				// Try relative to the config file's directory first
+				relToConfigDir := filepath.Join(filepath.Dir(configPath), baselinePath)
+				if _, err := os.Stat(relToConfigDir); err == nil {
+					baselinePath = relToConfigDir
+				} else {
+					// Fallback to relative to the package root directory
+					baselinePath = filepath.Join(packagePath, baselinePath)
+				}
+			} else {
+				// If the absolute path doesn't exist, try to resolve it as a suffix under packagePath
+				if _, err := os.Stat(baselinePath); err != nil {
+					resolved := resolveAbsPathUnderPackage(packagePath, baselinePath)
+					if resolved != "" {
+						baselinePath = resolved
+					}
+				}
 			}
 		}
 	}
 
 	if baselinePath == "" {
-		defaultBaseline := filepath.Join(packagePath, "igor-baseline.json")
-		if _, err := os.Stat(defaultBaseline); err == nil {
-			baselinePath = defaultBaseline
+		baselineCandidates := []string{
+			"igor-baseline.json",
+			filepath.Join("config", "ci", "igor-baseline.json"),
+			filepath.Join("config", "igor-baseline.json"),
+			filepath.Join(".github", "igor-baseline.json"),
+		}
+		for _, b := range baselineCandidates {
+			p := filepath.Join(packagePath, b)
+			if _, err := os.Stat(p); err == nil {
+				baselinePath = p
+				break
+			}
 		}
 	}
 
@@ -273,6 +312,42 @@ func loadAndMergePackageBaseline(packagePath, vName, pName string, isSymlink boo
 		}
 	}
 	return 0
+}
+
+func resolveAbsPathUnderPackage(packagePath, absPath string) string {
+	cleaned := filepath.Clean(absPath)
+	// Split by path separator, using filepath.ToSlash to handle all OS paths consistently
+	parts := strings.Split(filepath.ToSlash(cleaned), "/")
+
+	var elements []string
+	for _, p := range parts {
+		if p != "" {
+			elements = append(elements, p)
+		}
+	}
+
+	for i := 0; i < len(elements); i++ {
+		suffixPath := filepath.Join(elements[i:]...)
+		fullPath := filepath.Join(packagePath, suffixPath)
+		if _, err := os.Stat(fullPath); err == nil {
+			return fullPath
+		}
+	}
+	return ""
+}
+
+func isAbsPath(path string) bool {
+	if filepath.IsAbs(path) {
+		return true
+	}
+	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
+		return true
+	}
+	// Check for Windows drive letters (e.g. C:\ or c:/)
+	if len(path) >= 2 && path[1] == ':' && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) {
+		return true
+	}
+	return false
 }
 
 // loadContainerDump resolves and parses the generic container-dump file (if

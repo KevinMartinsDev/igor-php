@@ -319,3 +319,135 @@ func TestExternalBaseline_DebugSubcommand(t *testing.T) {
 		t.Errorf("Expected output to contain package1 reason %q, got:\n%s", expectedReason, output)
 	}
 }
+
+func TestExternalBaseline_SubdirectoryDiscovery(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "igor_subdirs_baseline_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writeTestFile := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatalf("Failed to write %s: %v", path, err)
+		}
+	}
+
+	mkdirAll := func(path string) {
+		t.Helper()
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatalf("Failed to create dir %s: %v", path, err)
+		}
+	}
+
+	vendorDir := filepath.Join(tmpDir, "vendor")
+	pkg4Dir := filepath.Join(vendorDir, "acme", "package4")
+	pkg5Dir := filepath.Join(vendorDir, "acme", "package5")
+	pkg6Dir := filepath.Join(vendorDir, "acme", "package6")
+	pkg7Dir := filepath.Join(vendorDir, "acme", "package7")
+
+	// Pkg 4: config/ci/igor.json specifying a baseline in the same folder: "igor-baseline.json"
+	pkg4ConfigDir := filepath.Join(pkg4Dir, "config", "ci")
+	mkdirAll(pkg4ConfigDir)
+	pkg4Config := `{
+		"baseline": "igor-baseline.json"
+	}`
+	writeTestFile(filepath.Join(pkg4ConfigDir, "igor.json"), pkg4Config)
+	pkg4Baseline := `{
+		"files": {
+			"src/Service4.php": [
+				{"message": "State mutation in Service4"}
+			]
+		}
+	}`
+	writeTestFile(filepath.Join(pkg4ConfigDir, "igor-baseline.json"), pkg4Baseline)
+
+	// Pkg 5: config/igor-baseline.json directly, no igor.json
+	pkg5ConfigDir := filepath.Join(pkg5Dir, "config")
+	mkdirAll(pkg5ConfigDir)
+	pkg5Baseline := `{
+		"files": {
+			"src/Service5.php": [
+				{"message": "State mutation in Service5"}
+			]
+		}
+	}`
+	writeTestFile(filepath.Join(pkg5ConfigDir, "igor-baseline.json"), pkg5Baseline)
+
+	// Pkg 6: .github/igor.json specifying a baseline in the package root: "root-baseline.json"
+	pkg6GithubDir := filepath.Join(pkg6Dir, ".github")
+	mkdirAll(pkg6GithubDir)
+	pkg6Config := `{
+		"baseline": "root-baseline.json"
+	}`
+	writeTestFile(filepath.Join(pkg6GithubDir, "igor.json"), pkg6Config)
+	pkg6Baseline := `{
+		"files": {
+			"src/Service6.php": [
+				{"message": "State mutation in Service6"}
+			]
+		}
+	}`
+	writeTestFile(filepath.Join(pkg6Dir, "root-baseline.json"), pkg6Baseline)
+
+	// Pkg 7: config/ci/igor.json with non-existent absolute path "/app/config/ci/igor-baseline.json"
+	pkg7ConfigDir := filepath.Join(pkg7Dir, "config", "ci")
+	mkdirAll(pkg7ConfigDir)
+	pkg7Config := `{
+		"baseline": "/app/config/ci/igor-baseline.json"
+	}`
+	writeTestFile(filepath.Join(pkg7ConfigDir, "igor.json"), pkg7Config)
+	pkg7Baseline := `{
+		"files": {
+			"src/Service7.php": [
+				{"message": "State mutation in Service7"}
+			]
+		}
+	}`
+	writeTestFile(filepath.Join(pkg7ConfigDir, "igor-baseline.json"), pkg7Baseline)
+
+	cfg := config.Config{
+		BaselinePath:           "igor-baseline.json",
+		IgnoreExternalBaseline: false,
+	}
+
+	// Load and merge baselines
+	baseline := loadAuditBaseline(tmpDir, &cfg)
+
+	// Verify package 4 was loaded
+	p4Path := filepath.Join("vendor", "acme", "package4", "src/Service4.php")
+	p4Entries, found := baseline.Files[p4Path]
+	if !found {
+		t.Errorf("Expected package4 baseline path %q to be loaded", p4Path)
+	} else if len(p4Entries) != 1 || p4Entries[0].Message != "State mutation in Service4" {
+		t.Errorf("Unexpected entries for package4: %v", p4Entries)
+	}
+
+	// Verify package 5 was loaded
+	p5Path := filepath.Join("vendor", "acme", "package5", "src/Service5.php")
+	p5Entries, found := baseline.Files[p5Path]
+	if !found {
+		t.Errorf("Expected package5 baseline path %q to be loaded", p5Path)
+	} else if len(p5Entries) != 1 || p5Entries[0].Message != "State mutation in Service5" {
+		t.Errorf("Unexpected entries for package5: %v", p5Entries)
+	}
+
+	// Verify package 6 was loaded (tests fallback of relative path to package root)
+	p6Path := filepath.Join("vendor", "acme", "package6", "src/Service6.php")
+	p6Entries, found := baseline.Files[p6Path]
+	if !found {
+		t.Errorf("Expected package6 baseline path %q to be loaded", p6Path)
+	} else if len(p6Entries) != 1 || p6Entries[0].Message != "State mutation in Service6" {
+		t.Errorf("Unexpected entries for package6: %v", p6Entries)
+	}
+
+	// Verify package 7 was loaded (tests dynamic suffix resolution of non-existent absolute path)
+	p7Path := filepath.Join("vendor", "acme", "package7", "src/Service7.php")
+	p7Entries, found := baseline.Files[p7Path]
+	if !found {
+		t.Errorf("Expected package7 baseline path %q to be loaded", p7Path)
+	} else if len(p7Entries) != 1 || p7Entries[0].Message != "State mutation in Service7" {
+		t.Errorf("Unexpected entries for package7: %v", p7Entries)
+	}
+}
