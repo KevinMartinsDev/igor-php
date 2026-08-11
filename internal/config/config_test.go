@@ -247,8 +247,8 @@ func TestConfig_NormalizePath(t *testing.T) {
 	}
 
 	// Case 2: SymlinkMap has mappings
-	realPath := "/private/var/tmp/symlink-target"
-	symlinkedPath := "vendor/acme/my-bundle"
+	realPath := filepath.Clean("/private/var/tmp/symlink-target")
+	symlinkedPath := filepath.Clean("vendor/acme/my-bundle")
 	cfgWithMap := Config{
 		SymlinkMap: map[string]string{
 			realPath: symlinkedPath,
@@ -262,8 +262,8 @@ func TestConfig_NormalizePath(t *testing.T) {
 	}{
 		{
 			name:     "Belongs to symlink package",
-			path:     realPath + "/src/Service/MyService.php",
-			expected: symlinkedPath + "/src/Service/MyService.php",
+			path:     filepath.Join(realPath, "src/Service/MyService.php"),
+			expected: filepath.Join(symlinkedPath, "src/Service/MyService.php"),
 		},
 		{
 			name:     "Exact match of root symlink target",
@@ -272,8 +272,8 @@ func TestConfig_NormalizePath(t *testing.T) {
 		},
 		{
 			name:     "Does not belong to symlink package",
-			path:     "/other/unrelated/path.php",
-			expected: "/other/unrelated/path.php",
+			path:     filepath.Clean("/other/unrelated/path.php"),
+			expected: filepath.Clean("/other/unrelated/path.php"),
 		},
 	}
 
