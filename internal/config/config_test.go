@@ -238,3 +238,50 @@ func TestConfig_IsExcluded(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_NormalizePath(t *testing.T) {
+	// Case 1: SymlinkMap is nil
+	cfg := Config{SymlinkMap: nil}
+	if got := cfg.NormalizePath("some/path/file.php"); got != "some/path/file.php" {
+		t.Errorf("Expected unchanged path, got: %s", got)
+	}
+
+	// Case 2: SymlinkMap has mappings
+	realPath := "/private/var/tmp/symlink-target"
+	symlinkedPath := "vendor/acme/my-bundle"
+	cfgWithMap := Config{
+		SymlinkMap: map[string]string{
+			realPath: symlinkedPath,
+		},
+	}
+
+	tests := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{
+			name:     "Belongs to symlink package",
+			path:     realPath + "/src/Service/MyService.php",
+			expected: symlinkedPath + "/src/Service/MyService.php",
+		},
+		{
+			name:     "Exact match of root symlink target",
+			path:     realPath,
+			expected: symlinkedPath,
+		},
+		{
+			name:     "Does not belong to symlink package",
+			path:     "/other/unrelated/path.php",
+			expected: "/other/unrelated/path.php",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cfgWithMap.NormalizePath(tt.path); filepath.ToSlash(got) != filepath.ToSlash(tt.expected) {
+				t.Errorf("NormalizePath(%q) = %q, expected %q", tt.path, got, tt.expected)
+			}
+		})
+	}
+}

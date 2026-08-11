@@ -780,3 +780,59 @@ class MyStaticService {
 		t.Error("Expected a static state mutation finding for self::$cache")
 	}
 }
+
+func TestPHPVisitor_ConstructorPromotionAndAttributes(t *testing.T) {
+	code := `<?php
+class AdvancedService {
+    private string $normalProp;
+
+    public function __construct(
+        string $normalParam,
+        #[WorkerSafe]
+        private readonly string $promotedReadonlyProp,
+        private string $promotedProp
+    ) {
+        $this->normalProp = $normalParam;
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	
+	var classNode *sitter.Node
+	for i := uint(0); i < tree.RootNode().ChildCount(); i++ {
+		child := tree.RootNode().Child(i)
+		if child.Kind() == "class_declaration" {
+			classNode = child
+			break
+		}
+	}
+
+	if classNode != nil {
+		v.handleClass(classNode)
+	}
+
+	// Verify property types and declarations were extracted correctly
+	if tType, ok := v.propertyTypes["promotedReadonlyProp"]; !ok || tType != "string" {
+		t.Errorf("Expected promotedReadonlyProp to have type 'string', got: %s", tType)
+	}
+	if tType, ok := v.propertyTypes["promotedProp"]; !ok || tType != "string" {
+		t.Errorf("Expected promotedProp to have type 'string', got: %s", tType)
+	}
+	if !v.declaredProps["promotedProp"] {
+		t.Error("Expected promotedProp to be registered as declared")
+	}
+	if !v.readonlyProps["promotedReadonlyProp"] {
+		t.Error("Expected promotedReadonlyProp to be registered as readonly")
+	}
+	if !v.workerSafeProps["promotedReadonlyProp"] {
+		t.Error("Expected promotedReadonlyProp to be registered as WorkerSafe")
+	}
+}

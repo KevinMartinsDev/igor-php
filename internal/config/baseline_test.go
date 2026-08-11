@@ -241,3 +241,34 @@ func TestIdentifyAndPruneStaleBaselineEntries(t *testing.T) {
 		t.Errorf("Expected other_service.php to be completely removed from pruned baseline")
 	}
 }
+
+func TestWriteBaseline(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "igor_write_baseline_test")
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	b := Baseline{
+		Files: map[string][]BaselineEntry{
+			"test.php": {
+				{
+					Message: "Mutation error",
+					Reason:  "Safe",
+				},
+			},
+		},
+	}
+
+	path := filepath.Join(tmpDir, "custom-baseline.json")
+	err := WriteBaseline(path, b)
+	if err != nil {
+		t.Fatalf("WriteBaseline failed: %v", err)
+	}
+
+	loaded, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline failed: %v", err)
+	}
+
+	if len(loaded.Files["test.php"]) != 1 || loaded.Files["test.php"][0].Message != "Mutation error" {
+		t.Errorf("Unexpected loaded baseline content: %v", loaded.Files["test.php"])
+	}
+}
