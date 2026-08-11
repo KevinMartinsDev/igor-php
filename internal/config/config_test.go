@@ -173,3 +173,68 @@ func TestInitConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestConfig_IsExcluded(t *testing.T) {
+	cfg := Config{
+		Exclude: []string{
+			"tests/",
+			"src/Cache",
+			"vendor",
+		},
+	}
+
+	root := "/app"
+	if os.PathSeparator == '\\' {
+		root = "C:\\app"
+	}
+
+	tests := []struct {
+		name     string
+		path     string
+		expected bool
+	}{
+		{
+			name:     "Exact match directory (excluding trailing slash in rule)",
+			path:     filepath.Join(root, "tests"),
+			expected: true,
+		},
+		{
+			name:     "File inside excluded directory (with trailing slash in rule)",
+			path:     filepath.Join(root, "tests/Unit/MyTest.php"),
+			expected: true,
+		},
+		{
+			name:     "Exact match directory (no trailing slash in rule)",
+			path:     filepath.Join(root, "src/Cache"),
+			expected: true,
+		},
+		{
+			name:     "File inside excluded directory (no trailing slash in rule)",
+			path:     filepath.Join(root, "src/Cache/item.tmp"),
+			expected: true,
+		},
+		{
+			name:     "Non-excluded file",
+			path:     filepath.Join(root, "src/Service/MyService.php"),
+			expected: false,
+		},
+		{
+			name:     "Path not under root",
+			path:     "/other/path/file.php",
+			expected: false,
+		},
+		{
+			name:     "Partial prefix match of folder (should not exclude)",
+			path:     filepath.Join(root, "vendor-provider.php"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cfg.IsExcluded(tt.path, root); got != tt.expected {
+				t.Errorf("IsExcluded(%q, %q) = %v, expected %v", tt.path, root, got, tt.expected)
+			}
+		})
+	}
+}
