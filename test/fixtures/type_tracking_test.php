@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Service\Microservice\Billing;
+namespace App\Service\TraceTest;
 
 interface TracerInterface {
     public function makeSpan(): Span;

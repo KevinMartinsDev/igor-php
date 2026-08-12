@@ -447,11 +447,11 @@ func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
 
 	a.Symfony = &SymfonyBridge{
 		ClassToFile: map[string]string{
-			"App\\Service\\Microservice\\Billing\\TracerInterface": filePath,
-			"App\\Service\\Microservice\\Billing\\Span":            filePath,
-			"App\\Service\\Microservice\\Billing\\FakeEntityManager": filePath,
-			"App\\Service\\Microservice\\Billing\\SuperService":      filePath,
-			"App\\Service\\Microservice\\Billing\\UnsafeService":     filePath,
+			"App\\Service\\TraceTest\\TracerInterface": filePath,
+			"App\\Service\\TraceTest\\Span":            filePath,
+			"App\\Service\\TraceTest\\FakeEntityManager": filePath,
+			"App\\Service\\TraceTest\\SuperService":      filePath,
+			"App\\Service\\TraceTest\\UnsafeService":     filePath,
 			"Doctrine\\ORM\\EntityManagerInterface":               filePath,
 		},
 		Container: &symbol.SymfonyContainer{
@@ -460,20 +460,20 @@ func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
 					Class:      "Doctrine\\Bundle\\DoctrineBundle\\Registry",
 					Resettable: true,
 				},
-				"App\\Service\\Microservice\\Billing\\TracerInterface": {
-					Class:  "App\\Service\\Microservice\\Billing\\TracerInterface",
+				"App\\Service\\TraceTest\\TracerInterface": {
+					Class:  "App\\Service\\TraceTest\\TracerInterface",
 					Shared: true,
 				},
-				"App\\Service\\Microservice\\Billing\\SuperService": {
-					Class:  "App\\Service\\Microservice\\Billing\\SuperService",
+				"App\\Service\\TraceTest\\SuperService": {
+					Class:  "App\\Service\\TraceTest\\SuperService",
 					Shared: true,
 				},
-				"App\\Service\\Microservice\\Billing\\UnsafeService": {
-					Class:  "App\\Service\\Microservice\\Billing\\UnsafeService",
+				"App\\Service\\TraceTest\\UnsafeService": {
+					Class:  "App\\Service\\TraceTest\\UnsafeService",
 					Shared: true,
 				},
-				"App\\Service\\Microservice\\Billing\\FakeEntityManager": {
-					Class:  "App\\Service\\Microservice\\Billing\\FakeEntityManager",
+				"App\\Service\\TraceTest\\FakeEntityManager": {
+					Class:  "App\\Service\\TraceTest\\FakeEntityManager",
 					Shared: true,
 				},
 			},
