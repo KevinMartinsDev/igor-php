@@ -498,3 +498,40 @@ func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditor_UnitEdgeCases(t *testing.T) {
+	// Test IsSharedService edge cases
+	{
+		a := NewAuditor(config.Config{})
+		// a.Symfony is nil
+		if !a.IsSharedService("AnyClass") {
+			t.Error("Expected IsSharedService to return true when Symfony is nil")
+		}
+	}
+
+	// Test GetMethodReturnType edge cases
+	{
+		a := NewAuditor(config.Config{})
+		// a.Symfony is nil
+		if a.GetMethodReturnType("App\\Service", "make") != "" {
+			t.Error("Expected GetMethodReturnType to return empty when Symfony is nil")
+		}
+
+		a.Symfony = &SymfonyBridge{}
+		// a.Symfony.ClassToFile is nil
+		if a.GetMethodReturnType("App\\Service", "make") != "" {
+			t.Error("Expected GetMethodReturnType to return empty when ClassToFile is nil")
+		}
+	}
+
+	// Test isBuiltinType exhaustively
+	builtins := []string{"void", "int", "string", "bool", "float", "array", "callable", "object", "mixed", "never", "false", "null"}
+	for _, b := range builtins {
+		if !isBuiltinType(b) {
+			t.Errorf("Expected isBuiltinType to return true for %q", b)
+		}
+	}
+	if isBuiltinType("MyCustomClass") {
+		t.Error("Expected isBuiltinType to return false for MyCustomClass")
+	}
+}
