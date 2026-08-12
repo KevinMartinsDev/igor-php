@@ -8,27 +8,3 @@ services:
         resource: '../src/'
         exclude:
             - '../src/Kernel.php'
-
-    App\Service\TracerInterface: '@App\Service\FakeTracer'
-
-    App\Service\TracerLeakDemoService:
-        public: true
-        tags: ['controller.service_arguments']
-    App\Service\TracerUnsafeDemoService:
-        public: true
-        tags: ['controller.service_arguments']
-    App\Service\FakeEntityManager:
-        public: true
-        tags: ['controller.service_arguments']
-    App\Service\StatefulService:
-        public: true
-        tags: ['controller.service_arguments']
-    App\Service\ClosureLeakService:
-        public: true
-        tags: ['controller.service_arguments']
-    App\Service\LocalStaticService:
-        public: true
-        tags: ['controller.service_arguments']
-    App\Service\StaticLeakService:
-        public: true
-        tags: ['controller.service_arguments']
