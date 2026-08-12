@@ -233,6 +233,79 @@ func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
 	})
 }
 
+func TestAuditor_IsResettable_DoctrineManager(t *testing.T) {
+	// Case 1: doctrine is resettable
+	{
+		a := NewAuditor(config.Config{})
+		a.Symfony = &SymfonyBridge{
+			Container: &symbol.SymfonyContainer{
+				Definitions: map[string]symbol.SymfonyService{
+					"doctrine": {
+						Class:      "Doctrine\\Bundle\\DoctrineBundle\\Registry",
+						Resettable: true,
+					},
+				},
+			},
+		}
+
+		if !a.IsResettable("Doctrine\\ORM\\EntityManagerInterface") {
+			t.Error("Expected EntityManagerInterface to be resettable when 'doctrine' service is resettable")
+		}
+	}
+
+	// Case 2: doctrine is NOT resettable
+	{
+		a := NewAuditor(config.Config{})
+		a.Symfony = &SymfonyBridge{
+			Container: &symbol.SymfonyContainer{
+				Definitions: map[string]symbol.SymfonyService{
+					"doctrine": {
+						Class:      "Doctrine\\Bundle\\DoctrineBundle\\Registry",
+						Resettable: false,
+					},
+				},
+			},
+		}
+
+		if a.IsResettable("Doctrine\\ORM\\EntityManagerInterface") {
+			t.Error("Expected EntityManagerInterface to NOT be resettable when 'doctrine' service is NOT resettable")
+		}
+	}
+
+	// Case 3: doctrine_mongodb is resettable
+	{
+		a := NewAuditor(config.Config{})
+		a.Symfony = &SymfonyBridge{
+			Container: &symbol.SymfonyContainer{
+				Definitions: map[string]symbol.SymfonyService{
+					"doctrine_mongodb": {
+						Class:      "Doctrine\\Bundle\\MongoDBBundle\\ManagerRegistry",
+						Resettable: true,
+					},
+				},
+			},
+		}
+
+		if !a.IsResettable("Doctrine\\ODM\\MongoDB\\DocumentManager") {
+			t.Error("Expected DocumentManager to be resettable when 'doctrine_mongodb' service is resettable")
+		}
+	}
+
+	// Case 4: No doctrine registry service defined
+	{
+		a := NewAuditor(config.Config{})
+		a.Symfony = &SymfonyBridge{
+			Container: &symbol.SymfonyContainer{
+				Definitions: map[string]symbol.SymfonyService{},
+			},
+		}
+
+		if a.IsResettable("Doctrine\\ORM\\EntityManagerInterface") {
+			t.Error("Expected EntityManagerInterface to NOT be resettable when no registry is defined")
+		}
+	}
+}
+
 func TestAuditor_HelperMethods(t *testing.T) {
 	cfg := config.Config{
 		DevPackages:    []string{"phpunit/phpunit", "friendsofphp/php-cs-fixer"},

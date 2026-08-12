@@ -219,6 +219,27 @@ func (a *Auditor) IsResettable(className string) bool {
 	}
 	possibleIDs := a.resolveAliases(className)
 
+	// Check if any of possibleIDs corresponds to a Doctrine Manager
+	isDoctrine := false
+	for _, id := range possibleIDs {
+		lower := strings.ToLower(id)
+		if strings.Contains(lower, "doctrine\\orm\\entitymanager") ||
+			strings.Contains(lower, "doctrine\\persistence\\objectmanager") ||
+			strings.Contains(lower, "doctrine\\odm\\mongodb\\documentmanager") {
+			isDoctrine = true
+			break
+		}
+	}
+
+	if isDoctrine {
+		if def, exists := a.Symfony.Container.Definitions["doctrine"]; exists && def.IsResettable() {
+			return true
+		}
+		if def, exists := a.Symfony.Container.Definitions["doctrine_mongodb"]; exists && def.IsResettable() {
+			return true
+		}
+	}
+
 	for defID, def := range a.Symfony.Container.Definitions {
 		normDefID := normalizeClassName(defID)
 		normDefClass := normalizeClassName(def.Class)
