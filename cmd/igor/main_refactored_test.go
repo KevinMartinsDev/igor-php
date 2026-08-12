@@ -534,3 +534,52 @@ func TestParseFlagsAndInit_Subcommands(t *testing.T) {
 		t.Error("Expected shouldExit to be true for review subcommand error")
 	}
 }
+
+func TestHandleExplainSubcommand_Success(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "igor_explain_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create a mock php file inside tempDir/src/Service/
+	srcDir := filepath.Join(tempDir, "src", "Service")
+	_ = os.MkdirAll(srcDir, 0755)
+
+	phpFile := filepath.Join(srcDir, "MyService.php")
+	_ = os.WriteFile(phpFile, []byte(`<?php
+namespace App\Service;
+class MyService {
+    public static $staticVar = 1;
+    public function touch() {
+        self::$staticVar = 2;
+        exit(1);
+    }
+}
+`), 0644)
+
+	// Create igor.json
+	igorJson := filepath.Join(tempDir, "igor.json")
+	_ = os.WriteFile(igorJson, []byte(`{}`), 0644)
+
+	// Test handleExplainSubcommand without filter
+	err = handleExplainSubcommand([]string{"explain", tempDir}, "")
+	if err != nil {
+		t.Fatalf("handleExplainSubcommand failed: %v", err)
+	}
+
+	// Test handleExplainSubcommand with filter
+	err = handleExplainSubcommand([]string{"explain", tempDir, "MyService"}, "")
+	if err != nil {
+		t.Fatalf("handleExplainSubcommand with filter failed: %v", err)
+	}
+
+	// Test parseFlagsAndInit for explain subcommand
+	_, _, shouldExit, err := parseFlagsAndInit([]string{"igor", "explain", tempDir})
+	if err != nil {
+		t.Errorf("Unexpected error for parseFlagsAndInit with explain: %v", err)
+	}
+	if !shouldExit {
+		t.Error("Expected shouldExit to be true for explain subcommand")
+	}
+}
