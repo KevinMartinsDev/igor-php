@@ -583,3 +583,66 @@ class MyService {
 		t.Error("Expected shouldExit to be true for explain subcommand")
 	}
 }
+
+func TestFormatExplainRow_Direct(t *testing.T) {
+	// Case 1: Shared service with all possible findings
+	status := symbol.AuditStatus{
+		ServiceID: "App\\Service\\MySharedService",
+		FilePath:  "src/Service/MySharedService.php",
+		IsShared:  true,
+		Findings: []symbol.Finding{
+			{Message: "class static property mutation", Line: 10, Snippet: "self::$cache = 1"},
+			{Message: "forbidden exit call", Line: 20, Snippet: "exit(1)"},
+			{Message: "PHP Superglobal $_GET used", Line: 30, Snippet: "$_GET"},
+			{Message: "closure capturing local state", Line: 40, Snippet: "function() use ($x)"},
+			{Message: "some standard mutation", Line: 50, Snippet: "$this->prop = 2"},
+		},
+	}
+
+	row, reasons := formatExplainRow(status, "App\\Service\\MySharedService")
+	if !strings.Contains(row, "YES") {
+		t.Error("Expected Shared column to be YES")
+	}
+	if !strings.Contains(row, "KO (State Poison)") {
+		t.Error("Expected Verdict to be KO (State Poison)")
+	}
+
+	// We expect exactly 5 reasons (1 for each finding type)
+	if len(reasons) != 5 {
+		t.Errorf("Expected 5 reasons, got %d", len(reasons))
+	}
+
+	// Case 2: Stateless service (0 findings)
+	statusOK := symbol.AuditStatus{
+		ServiceID: "App\\Service\\MyStatelessService",
+		FilePath:  "src/Service/MyStatelessService.php",
+		IsShared:  false,
+		Findings:  nil,
+	}
+
+	rowOK, reasonsOK := formatExplainRow(statusOK, "App\\Service\\MyStatelessService")
+	if !strings.Contains(rowOK, "NO") {
+		t.Error("Expected Shared column to be NO")
+	}
+	if !strings.Contains(rowOK, "OK (Stateless)") {
+		t.Error("Expected Verdict to be OK (Stateless)")
+	}
+	if len(reasonsOK) != 2 {
+		t.Errorf("Expected 2 default OK reasons, got %d", len(reasonsOK))
+	}
+
+	// Case 3: Standard mutation only (KO State Mutation)
+	statusMutation := symbol.AuditStatus{
+		ServiceID: "App\\Service\\MyMutationService",
+		FilePath:  "src/Service/MyMutationService.php",
+		IsShared:  true,
+		Findings: []symbol.Finding{
+			{Message: "some standard mutation", Line: 50, Snippet: "$this->prop = 2"},
+		},
+	}
+
+	rowMut, _ := formatExplainRow(statusMutation, "App\\Service\\MyMutationService")
+	if !strings.Contains(rowMut, "KO (State Mutation)") {
+		t.Error("Expected Verdict to be KO (State Mutation)")
+	}
+}

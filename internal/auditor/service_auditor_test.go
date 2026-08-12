@@ -507,6 +507,12 @@ func TestAuditor_UnitEdgeCases(t *testing.T) {
 		if !a.IsSharedService("AnyClass") {
 			t.Error("Expected IsSharedService to return true when Symfony is nil")
 		}
+
+		a.Symfony = &SymfonyBridge{}
+		// a.Symfony.Container is nil
+		if !a.IsSharedService("AnyClass") {
+			t.Error("Expected IsSharedService to return true when Symfony Container is nil")
+		}
 	}
 
 	// Test GetMethodReturnType edge cases
@@ -521,6 +527,24 @@ func TestAuditor_UnitEdgeCases(t *testing.T) {
 		// a.Symfony.ClassToFile is nil
 		if a.GetMethodReturnType("App\\Service", "make") != "" {
 			t.Error("Expected GetMethodReturnType to return empty when ClassToFile is nil")
+		}
+
+		// Directory path to force os.ReadFile error inside parseClassMethodSignatures
+		tmpDir, err := os.MkdirTemp("", "igor_aud_err")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		a.Symfony = &SymfonyBridge{
+			ClassToFile: map[string]string{
+				"App\\Service\\ErrorClass": tmpDir, // Directory path will fail ReadFile
+			},
+		}
+
+		ret := a.GetMethodReturnType("App\\Service\\ErrorClass", "make")
+		if ret != "" {
+			t.Errorf("Expected empty return type on ReadFile error, got %q", ret)
 		}
 	}
 
