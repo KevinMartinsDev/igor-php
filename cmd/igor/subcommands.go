@@ -270,7 +270,6 @@ func handleExplainSubcommand(args []string, configPath string) error {
 	rootPath, _ := filepath.Abs(targetDir)
 
 	cfg := config.LoadConfig(rootPath, configPath)
-	cfg.NoAgent = true // Default to standard reflection in subcommands for stability
 
 	aud := auditor.NewAuditor(cfg)
 
@@ -295,6 +294,7 @@ func handleExplainSubcommand(args []string, configPath string) error {
 			fmt.Fprintf(os.Stderr, "🛡️  Baseline loaded: %d files will be partially ignored in diagnostics.\n", len(baseline.Files))
 		}
 	}
+	discoverAndMergeExternalBaselines(rootPath, &cfg, &baseline)
 
 	auditList := collectFiles(rootPath, cfg, aud)
 	if len(auditList) == 0 {
