@@ -41,7 +41,7 @@ func parseFlagsAndInit(args []string) (config.Config, string, bool, error) {
 		fmt.Fprintf(os.Stderr, "  %s [options] <directory>    Audit a project\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s init [options] [directory] Initialize a new igor.json config\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s review <json_file>       Review an audit JSON export with an LLM\n", binName)
-		fmt.Fprintf(os.Stderr, "  %s explain [directory]       Display sémantique diagnostics explanation matrix for services\n", binName)
+		fmt.Fprintf(os.Stderr, "  %s explain [directory] [filter] Display semantic diagnostics explanation matrix for services\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s debug-external-baseline [directory] List all discovered vendor baselines in the project\n\n", binName)
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		fs.PrintDefaults()
@@ -53,7 +53,7 @@ func parseFlagsAndInit(args []string) (config.Config, string, bool, error) {
 		fmt.Fprintf(os.Stderr, "  %s -c custom-igor.json .\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s init\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s review igor-export.json\n", binName)
-		fmt.Fprintf(os.Stderr, "  %s explain .\n", binName)
+		fmt.Fprintf(os.Stderr, "  %s explain . SuperService\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s debug-external-baseline .\n", binName)
 		fmt.Fprintf(os.Stderr, "  %s --env stage --verbose ./my-project\n", binName)
 	}

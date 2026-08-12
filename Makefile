@@ -6,12 +6,13 @@ build:
 
 # Run the binary locally on a target path (usage: make run path=test/fixtures or defaults to .)
 path ?= .
+filter ?=
 run: build
 	./bin/igor $(path)
 
-# Run semantic explanation diagnostics on a target path (usage: make explain path=test/fixtures or defaults to .)
+# Run semantic explanation diagnostics on a target path (usage: make explain path=test/fixtures filter=SuperService)
 explain: build
-	./bin/igor explain $(path)
+	./bin/igor explain $(path) $(filter)
 
 # Alias to explain subcommand for debugging
 debug: explain
@@ -66,9 +67,9 @@ docker-ci: docker-build
 docker-run: docker-build
 	$(DOCKER_RUN) make run path=$(path)
 
-# Run semantic explanation diagnostics within Docker (usage: make docker-explain path=test/fixtures)
+# Run semantic explanation diagnostics within Docker (usage: make docker-explain path=test/fixtures filter=SuperService)
 docker-explain: docker-build
-	$(DOCKER_RUN) make explain path=$(path)
+	$(DOCKER_RUN) make explain path=$(path) filter=$(filter)
 
 # Alias to docker-explain subcommand for debugging inside Docker
 docker-debug: docker-explain

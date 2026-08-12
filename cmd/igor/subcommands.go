@@ -269,6 +269,11 @@ func handleExplainSubcommand(args []string, configPath string) error {
 	}
 	rootPath, _ := filepath.Abs(targetDir)
 
+	filterPattern := ""
+	if len(args) > 2 {
+		filterPattern = strings.ToLower(args[2])
+	}
+
 	cfg := config.LoadConfig(rootPath, configPath)
 
 	aud := auditor.NewAuditor(cfg)
@@ -279,7 +284,11 @@ func handleExplainSubcommand(args []string, configPath string) error {
 		aud.Symfony = symfony
 	}
 
-	fmt.Fprintf(os.Stderr, "🔍 Analyzing Igor's Semantics - Explain Matrix for: %s\n\n", rootPath)
+	fmt.Fprintf(os.Stderr, "🔍 Analyzing Igor's Semantics - Explain Matrix for: %s\n", rootPath)
+	if filterPattern != "" {
+		fmt.Fprintf(os.Stderr, "🎯 Filtering results containing: %q\n", args[2])
+	}
+	fmt.Fprintln(os.Stderr, "")
 
 	// Load Baseline if specified
 	var baseline config.Baseline
@@ -326,6 +335,15 @@ func handleExplainSubcommand(args []string, configPath string) error {
 		if className == "N/A" || className == "" {
 			// fallback to filename
 			className = filepath.Base(status.FilePath)
+		}
+
+		// Apply case-insensitive filter if specified
+		if filterPattern != "" {
+			lowerClass := strings.ToLower(className)
+			lowerPath := strings.ToLower(status.FilePath)
+			if !strings.Contains(lowerClass, filterPattern) && !strings.Contains(lowerPath, filterPattern) {
+				continue
+			}
 		}
 
 		row, reasons := formatExplainRow(status, className)
