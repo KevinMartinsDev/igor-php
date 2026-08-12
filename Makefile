@@ -39,11 +39,11 @@ clean:
 
 # Helper to run commands in the container with Go and golangci-lint caches mounted
 DOCKER_RUN = docker run --rm \
-	-v $(shell pwd):/app \
+	-v $(shell cd .. && pwd):$(shell cd .. && pwd) \
 	-v igor-go-cache:/root/.cache/go-build \
 	-v igor-go-mod:/go/pkg/mod \
 	-v igor-golangci-cache:/root/.cache/golangci-lint \
-	-w /app \
+	-w $(shell pwd) \
 	igor-dev
 
 # Build the development Docker image

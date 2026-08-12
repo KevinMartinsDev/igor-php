@@ -255,7 +255,7 @@ func formatExplainRow(status symbol.AuditStatus, className string) (string, []st
 	if len(reasons) == 0 {
 		reasons = []string{
 			"✅ No mutated static state, superglobals or exit/die statements detected.",
-			"✅ Injected dependencies are read-only or sémantiquement transient.",
+			"✅ Injected dependencies are read-only or semantically transient.",
 		}
 	}
 
@@ -280,7 +280,7 @@ func handleExplainSubcommand(args []string, configPath string) error {
 		aud.Symfony = symfony
 	}
 
-	fmt.Fprintf(os.Stderr, "🔍 Analyzing sémantique d'Igor - Explain Matrix for: %s\n\n", rootPath)
+	fmt.Fprintf(os.Stderr, "🔍 Analyzing Igor's Semantics - Explain Matrix for: %s\n\n", rootPath)
 
 	// Collect and run audit (ignore baseline during explain so users can see all diagnoses!)
 	var baseline config.Baseline
