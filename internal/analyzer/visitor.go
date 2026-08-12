@@ -14,6 +14,8 @@ type Engine interface {
 	IsExplicitlyNonShared(className string) bool
 	IsSafeNamespace(className string) bool
 	IsResettable(className string) bool
+	GetMethodReturnType(className, methodName string) string
+	IsSharedService(className string) bool
 }
 
 type mutationInfo struct {
@@ -38,6 +40,7 @@ type PHPVisitor struct {
 	readonlyProps      map[string]bool
 	workerSafeProps    map[string]bool
 	propertyTypes      map[string]string
+	localVarTypes      map[string]string
 	declaredProps      map[string]bool
 	finallyCleaned     map[string]bool
 	mutated            map[string]mutationInfo
@@ -58,6 +61,7 @@ func NewVisitor(content []byte, engine Engine) *PHPVisitor {
 		readonlyProps:   make(map[string]bool),
 		workerSafeProps: make(map[string]bool),
 		propertyTypes:   make(map[string]string),
+		localVarTypes:   make(map[string]string),
 		declaredProps:   make(map[string]bool),
 		finallyCleaned:  make(map[string]bool),
 		localSharedVars: make(map[string]bool),
@@ -430,7 +434,7 @@ func (v *PHPVisitor) handleAssignment(n *sitter.Node) {
 			leftLower := strings.ToLower(leftContent)
 			rightLower := strings.ToLower(rightContent)
 
-			if v.isTransientOrEphemeral(leftLower, rightLower, rightContent, right) {
+			if v.isTransientOrEphemeral(leftContent, leftLower, rightLower, rightContent, right) {
 				return
 			}
 
@@ -441,27 +445,91 @@ func (v *PHPVisitor) handleAssignment(n *sitter.Node) {
 	}
 }
 
-func (v *PHPVisitor) isTransientOrEphemeral(leftLower, rightLower, rightContent string, right *sitter.Node) bool {
+func isQueryBuilderOrExpression(leftLower, rightLower string) bool {
+	return strings.Contains(rightLower, "querybuilder") ||
+		strings.Contains(rightLower, "->expr(") ||
+		strings.Contains(rightLower, "->orx(") ||
+		strings.Contains(rightLower, "->andx(") ||
+		strings.Contains(leftLower, "querybuilder") ||
+		strings.Contains(leftLower, "expr")
+}
+
+func (v *PHPVisitor) isTransientOrEphemeral(leftContent, leftLower, rightLower, rightContent string, right *sitter.Node) bool {
 	// Heuristic 1: Instantiations using the 'new' keyword are always fresh/transient objects, never shared
 	if right.Kind() == "new_expression" || strings.HasPrefix(strings.TrimSpace(rightContent), "new ") {
 		return true
 	}
 
 	// Heuristic 2: Ephemeral database QueryBuilders and Expressions are query-scoped, never shared across requests
-	if strings.Contains(rightLower, "querybuilder") ||
-		strings.Contains(rightLower, "->expr(") ||
-		strings.Contains(rightLower, "->orx(") ||
-		strings.Contains(rightLower, "->andx(") ||
-		strings.Contains(leftLower, "querybuilder") ||
-		strings.Contains(leftLower, "expr") {
+	if isQueryBuilderOrExpression(leftLower, rightLower) {
 		return true
 	}
 
-	// Heuristic 3: Known factory, builder and safe transient infrastructure methods
+	// Heuristic 3: Check if it's a method call with semantic return-type tracking
+	kind := right.Kind()
+	if kind == "member_call_expression" || kind == "nullsafe_member_call_expression" {
+		obj := right.ChildByFieldName("object")
+		nameNode := right.ChildByFieldName("name")
+		if obj != nil && nameNode != nil && v.engine != nil {
+			receiverClass := v.resolveReceiverType(obj)
+			methodName := v.getContent(nameNode)
+			if receiverClass != "" && methodName != "" {
+				retType := v.engine.GetMethodReturnType(receiverClass, methodName)
+				if retType != "" {
+					// Save type in local variable tracking
+					v.localVarTypes[leftContent] = retType
+
+					// If the return type is not a shared service, it is transient!
+					if !v.engine.IsSharedService(retType) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// Heuristic 4: Known factory, builder and safe transient infrastructure methods (fallback/legacy)
 	return strings.Contains(rightLower, "->find") ||
 		strings.Contains(rightLower, "->create") ||
 		strings.Contains(rightLower, "->build") ||
 		strings.Contains(rightLower, "->getitem")
+}
+
+func (v *PHPVisitor) resolveReceiverType(n *sitter.Node) string {
+	if n == nil {
+		return ""
+	}
+	kind := n.Kind()
+
+	// Case 1: property fetch on $this, e.g. $this->tracer
+	if propName, ok := v.isPropertyFetchOnThis(n); ok {
+		if typeName, exists := v.propertyTypes[propName]; exists {
+			return v.resolveFQCN(typeName)
+		}
+	}
+
+	// Case 2: variable, e.g. $tracer
+	if kind == "variable" || kind == "variable_name" {
+		content := v.getContent(n)
+		if typeName, exists := v.localVarTypes[content]; exists {
+			return v.resolveFQCN(typeName)
+		}
+	}
+
+	// Case 3: member_call_expression / nullsafe_member_call_expression
+	if kind == "member_call_expression" || kind == "nullsafe_member_call_expression" {
+		obj := n.ChildByFieldName("object")
+		nameNode := n.ChildByFieldName("name")
+		if obj != nil && nameNode != nil {
+			receiverClass := v.resolveReceiverType(obj)
+			methodName := v.getContent(nameNode)
+			if receiverClass != "" && methodName != "" && v.engine != nil {
+				return v.engine.GetMethodReturnType(receiverClass, methodName)
+			}
+		}
+	}
+
+	return ""
 }
 
 func (v *PHPVisitor) isRightSideShared(rightContent string) bool {

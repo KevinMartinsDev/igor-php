@@ -8,6 +8,8 @@ use App\Service\FakeEntityManager;
 use App\Service\IncompleteResetService;
 use App\Service\StatefulService;
 use App\Service\StaticLeakService;
+use App\Service\TracerLeakDemoService;
+use App\Service\TracerUnsafeDemoService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -21,6 +23,8 @@ class LeakDemoController extends AbstractController
         private FakeEntityManager $entityManager,
         private ClosureLeakService $closureLeakService,
         private LocalStaticService $localStaticService,
+        private TracerLeakDemoService $tracerLeakDemoService,
+        private TracerUnsafeDemoService $tracerUnsafeDemoService,
     ) {}
 
     #[Route('/', name: 'demo_index')]

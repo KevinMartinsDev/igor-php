@@ -1,6 +1,7 @@
 package auditor
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -306,6 +307,79 @@ func TestAuditor_IsResettable_DoctrineManager(t *testing.T) {
 	}
 }
 
+func TestAuditor_GetMethodReturnType(t *testing.T) {
+	// Create temporary directory for our test file
+	tmpDir, err := os.MkdirTemp("", "igor_auditor_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	filePath := filepath.Join(tmpDir, "TracerInterface.php")
+	content := []byte(`<?php
+namespace App\Tracing;
+
+interface TracerInterface {
+    public function makeSpan(): Span;
+    public function getSelf(): self;
+    public function getStatic(): static;
+    public function nullableSpan(): ?Span;
+    public function noReturnType();
+}
+`)
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatalf("Failed to write mock file: %v", err)
+	}
+
+	a := NewAuditor(config.Config{})
+	a.Symfony = &SymfonyBridge{
+		ClassToFile: map[string]string{
+			"App\\Tracing\\TracerInterface": filePath,
+		},
+	}
+
+	// Test case 1: Normal return type
+	retType := a.GetMethodReturnType("App\\Tracing\\TracerInterface", "makeSpan")
+	if retType != "App\\Tracing\\Span" {
+		t.Errorf("Expected 'App\\Tracing\\Span', got %q", retType)
+	}
+
+	// Test case 2: self resolution
+	retTypeSelf := a.GetMethodReturnType("App\\Tracing\\TracerInterface", "getSelf")
+	if retTypeSelf != "App\\Tracing\\TracerInterface" {
+		t.Errorf("Expected 'App\\Tracing\\TracerInterface' for self return type, got %q", retTypeSelf)
+	}
+
+	// Test case 3: static resolution
+	retTypeStatic := a.GetMethodReturnType("App\\Tracing\\TracerInterface", "getStatic")
+	if retTypeStatic != "App\\Tracing\\TracerInterface" {
+		t.Errorf("Expected 'App\\Tracing\\TracerInterface' for static return type, got %q", retTypeStatic)
+	}
+
+	// Test case 4: nullable return type
+	retTypeNullable := a.GetMethodReturnType("App\\Tracing\\TracerInterface", "nullableSpan")
+	if retTypeNullable != "App\\Tracing\\Span" {
+		t.Errorf("Expected 'App\\Tracing\\Span' for nullableSpan, got %q", retTypeNullable)
+	}
+
+	// Test case 5: no return type declared
+	retTypeNone := a.GetMethodReturnType("App\\Tracing\\TracerInterface", "noReturnType")
+	if retTypeNone != "" {
+		t.Errorf("Expected empty string when no return type is declared, got %q", retTypeNone)
+	}
+
+	// Test case 6: non-existent class or method
+	retTypeNonExistentClass := a.GetMethodReturnType("App\\Tracing\\Unknown", "any")
+	if retTypeNonExistentClass != "" {
+		t.Errorf("Expected empty string for non-existent class, got %q", retTypeNonExistentClass)
+	}
+
+	retTypeNonExistentMethod := a.GetMethodReturnType("App\\Tracing\\TracerInterface", "unknown")
+	if retTypeNonExistentMethod != "" {
+		t.Errorf("Expected empty string for non-existent method, got %q", retTypeNonExistentMethod)
+	}
+}
+
 func TestAuditor_HelperMethods(t *testing.T) {
 	cfg := config.Config{
 		DevPackages:    []string{"phpunit/phpunit", "friendsofphp/php-cs-fixer"},
@@ -365,4 +439,62 @@ func TestAuditor_HelperMethods(t *testing.T) {
 			t.Error("Expected App\\Unsafe\\Helper NOT to be safe")
 		}
 	})
+}
+
+func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
+	a := NewAuditor(config.Config{})
+	filePath := filepath.Join("..", "..", "test", "fixtures", "type_tracking_test.php")
+
+	a.Symfony = &SymfonyBridge{
+		ClassToFile: map[string]string{
+			"App\\Service\\Microservice\\Billing\\TracerInterface": filePath,
+			"App\\Service\\Microservice\\Billing\\Span":            filePath,
+			"App\\Service\\Microservice\\Billing\\FakeEntityManager": filePath,
+			"App\\Service\\Microservice\\Billing\\SuperService":      filePath,
+			"App\\Service\\Microservice\\Billing\\UnsafeService":     filePath,
+			"Doctrine\\ORM\\EntityManagerInterface":               filePath,
+		},
+		Container: &symbol.SymfonyContainer{
+			Definitions: map[string]symbol.SymfonyService{
+				"doctrine": {
+					Class:      "Doctrine\\Bundle\\DoctrineBundle\\Registry",
+					Resettable: true,
+				},
+				"App\\Service\\Microservice\\Billing\\TracerInterface": {
+					Class:  "App\\Service\\Microservice\\Billing\\TracerInterface",
+					Shared: true,
+				},
+				"App\\Service\\Microservice\\Billing\\SuperService": {
+					Class:  "App\\Service\\Microservice\\Billing\\SuperService",
+					Shared: true,
+				},
+				"App\\Service\\Microservice\\Billing\\UnsafeService": {
+					Class:  "App\\Service\\Microservice\\Billing\\UnsafeService",
+					Shared: true,
+				},
+				"App\\Service\\Microservice\\Billing\\FakeEntityManager": {
+					Class:  "App\\Service\\Microservice\\Billing\\FakeEntityManager",
+					Shared: true,
+				},
+			},
+		},
+	}
+
+	findings, err := a.Audit(filePath, nil)
+	if err != nil {
+		t.Fatalf("Audit failed: %v", err)
+	}
+
+	// We expect exactly 2 findings:
+	// 1 for the chained EM call in testChainedEM() of SuperService
+	// 1 for the chained EM call in testUnsafeTracing() of UnsafeService
+	if len(findings) != 2 {
+		t.Fatalf("Expected exactly 2 findings on type_tracking_test.php, got %d: %v", len(findings), findings)
+	}
+
+	for _, f := range findings {
+		if !strings.Contains(f.Snippet, "disable") {
+			t.Errorf("Expected finding snippet to contain 'disable', got: %s (Message: %s)", f.Snippet, f.Message)
+		}
+	}
 }
