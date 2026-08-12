@@ -6,9 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/igor-php/igor-php/internal/auditor"
 	"github.com/igor-php/igor-php/internal/config"
 	"github.com/igor-php/igor-php/pkg/reporter"
+	"github.com/igor-php/igor-php/pkg/symbol"
 )
 
 func handleInitSubcommand(args []string, configPath string) error {
@@ -161,5 +164,209 @@ func handleDebugExternalBaselineSubcommand(args []string, configPath string) err
 			}
 		}
 	}
+	return nil
+}
+
+func diagnoseFindings(findings []symbol.Finding) (bool, bool, bool, bool, []string) {
+	hasStatic := false
+	hasTerminator := false
+	hasSuperglobal := false
+	hasClosureLeak := false
+	var reasons []string
+
+	for _, f := range findings {
+		msg := strings.ToLower(f.Message)
+		snippet := f.Snippet
+		line := f.Line
+
+		switch {
+		case strings.Contains(msg, "static"):
+			hasStatic = true
+			reasons = append(reasons, fmt.Sprintf("❌ [Static] %s (line %d)", f.Message, line))
+		case strings.Contains(msg, "exit") || strings.Contains(msg, "die"):
+			hasTerminator = true
+			reasons = append(reasons, fmt.Sprintf("❌ [Terminator] %s (line %d)", f.Message, line))
+		case strings.Contains(msg, "superglobal") || strings.Contains(msg, "superglobals"):
+			hasSuperglobal = true
+			reasons = append(reasons, fmt.Sprintf("❌ [Superglobal] %s (line %d)", f.Message, line))
+		case strings.Contains(msg, "closure") || strings.Contains(msg, "memory leak"):
+			hasClosureLeak = true
+			reasons = append(reasons, fmt.Sprintf("❌ [Closure Leak] %s (line %d)", f.Message, line))
+		default:
+			reasons = append(reasons, fmt.Sprintf("❌ [Mutation] %s (line %d: `%s`)", f.Message, line, strings.TrimSpace(snippet)))
+		}
+	}
+	return hasStatic, hasTerminator, hasSuperglobal, hasClosureLeak, reasons
+}
+
+func formatExplainRow(status symbol.AuditStatus, className string) (string, []string) {
+	hasStatic, hasTerminator, hasSuperglobal, hasClosureLeak, reasons := diagnoseFindings(status.Findings)
+
+	sharedStr := "NO"
+	if status.IsShared {
+		sharedStr = "YES"
+	}
+
+	staticStr := "NO"
+	if hasStatic {
+		staticStr = "YES"
+	}
+
+	termStr := "NO"
+	if hasTerminator {
+		termStr = "YES"
+	}
+
+	superStr := "NO"
+	if hasSuperglobal {
+		superStr = "YES"
+	}
+
+	leakStr := "NO"
+	if hasClosureLeak {
+		leakStr = "YES"
+	}
+
+	verdict := "✅ OK (Stateless)"
+	if len(status.Findings) > 0 {
+		if hasStatic || hasTerminator || hasSuperglobal || hasClosureLeak {
+			verdict = "❌ KO (State Poison)"
+		} else {
+			verdict = "❌ KO (State Mutation)"
+		}
+	}
+
+	paddedClass := className
+	if len(paddedClass) > 39 {
+		paddedClass = paddedClass[:36] + "..."
+	} else {
+		paddedClass += strings.Repeat(" ", 39-len(paddedClass))
+	}
+
+	paddedVerdict := verdict
+	if len(paddedVerdict) > 23 {
+		paddedVerdict = paddedVerdict[:20] + "..."
+	} else {
+		paddedVerdict += strings.Repeat(" ", 23-len(paddedVerdict))
+	}
+
+	row := fmt.Sprintf("| %s | %-6s | %-6s | %-5s | %-5s | %-5s | %s |", paddedClass, sharedStr, staticStr, termStr, superStr, leakStr, paddedVerdict)
+
+	if len(reasons) == 0 {
+		reasons = []string{
+			"✅ No mutated static state, superglobals or exit/die statements detected.",
+			"✅ Injected dependencies are read-only or semantically transient.",
+		}
+	}
+
+	return row, reasons
+}
+
+func handleExplainSubcommand(args []string, configPath string) error {
+	targetDir := "."
+	if len(args) > 1 {
+		targetDir = args[1]
+	}
+	rootPath, _ := filepath.Abs(targetDir)
+
+	filterPattern := ""
+	if len(args) > 2 {
+		filterPattern = strings.ToLower(args[2])
+	}
+
+	cfg := config.LoadConfig(rootPath, configPath)
+
+	aud := auditor.NewAuditor(cfg)
+
+	// Detect Symfony
+	symfony, err := auditor.DetectSymfony(rootPath, cfg)
+	if err == nil {
+		aud.Symfony = symfony
+	}
+
+	fmt.Fprintf(os.Stderr, "🔍 Analyzing Igor's Semantics - Explain Matrix for: %s\n", rootPath)
+	if filterPattern != "" {
+		fmt.Fprintf(os.Stderr, "🎯 Filtering results containing: %q\n", args[2])
+	}
+	fmt.Fprintln(os.Stderr, "")
+
+	// Load Baseline if specified
+	var baseline config.Baseline
+	baseline.Files = make(map[string][]config.BaselineEntry)
+	if cfg.BaselinePath != "" {
+		baselineFile := cfg.BaselinePath
+		if !filepath.IsAbs(baselineFile) {
+			baselineFile = filepath.Join(rootPath, baselineFile)
+		}
+		if loaded, err := config.LoadBaseline(baselineFile); err == nil {
+			baseline = loaded
+			fmt.Fprintf(os.Stderr, "🛡️  Baseline loaded: %d files will be partially ignored in diagnostics.\n", len(baseline.Files))
+		}
+	}
+	discoverAndMergeExternalBaselines(rootPath, &cfg, &baseline)
+
+	auditList := collectFiles(rootPath, cfg, aud)
+	if len(auditList) == 0 {
+		fmt.Println("No services found to audit.")
+		return nil
+	}
+
+	results := executeAudit(auditList, aud, cfg, baseline, rootPath)
+
+	// Build the table
+	fmt.Println("🔍 Igor Explanation Matrix - Services Audit Diagnoses")
+	fmt.Println("=====================================================")
+	fmt.Println("")
+
+	// Table header
+	fmt.Printf("+-----------------------------------------+--------+--------+-------+-------+-------+-------------------------+\n")
+	fmt.Printf("| Service Class                           | Shared | Static | Term  | Super | Leak  | Verdict                 |\n")
+	fmt.Printf("+-----------------------------------------+--------+--------+-------+-------+-------+-------------------------+\n")
+
+	type diagnosisDetail struct {
+		class   string
+		reasons []string
+	}
+	var details []diagnosisDetail
+
+	for _, status := range results {
+		// Get class name
+		className := status.ServiceID
+		if className == "N/A" || className == "" {
+			// fallback to filename
+			className = filepath.Base(status.FilePath)
+		}
+
+		// Apply case-insensitive filter if specified
+		if filterPattern != "" {
+			lowerClass := strings.ToLower(className)
+			lowerPath := strings.ToLower(status.FilePath)
+			if !strings.Contains(lowerClass, filterPattern) && !strings.Contains(lowerPath, filterPattern) {
+				continue
+			}
+		}
+
+		row, reasons := formatExplainRow(status, className)
+		fmt.Println(row)
+
+		details = append(details, diagnosisDetail{
+			class:   className,
+			reasons: reasons,
+		})
+	}
+
+	fmt.Printf("+-----------------------------------------+--------+--------+-------+-------+-------+-------------------------+\n")
+	fmt.Println("")
+	fmt.Println("🔬 Detailed Criteria Diagnoses:")
+	fmt.Println("--------------------------------")
+
+	for _, d := range details {
+		fmt.Printf("• %s:\n", d.class)
+		for _, r := range d.reasons {
+			fmt.Printf("  - %s\n", r)
+		}
+		fmt.Println("")
+	}
+
 	return nil
 }

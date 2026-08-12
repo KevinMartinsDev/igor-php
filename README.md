@@ -155,6 +155,35 @@ igor-php --console app/console --env stage --verbose .
 igor-php --no-agent .
 ```
 
+### 🧠 Semantic Explanation Matrix (Diagnostic Mode)
+If you want to understand the exact sémantique and diagnostic criteria that led Igor to flag or approve a service, you can run the `explain` command:
+
+```bash
+# Display diagnostic matrix for all services
+igor explain .
+
+# Filter the matrix on a specific class or file name (case-insensitive)
+igor explain . SuperService
+```
+
+This prints a tabular matrix summarizing which rules (`Static` mutations, `Term` terminators, `Super` globals, or `Leak` closure captures) are triggered on each class, alongside a detailed diagnosis explaining why each class is either safe (`✅ OK`) or dangerous (`❌ KO`):
+
+```text
+🔍 Igor Explanation Matrix - Services Audit Diagnoses
+=====================================================
+
++-----------------------------------------+--------+--------+-------+-------+-------+-------------------------+
+| Service Class                           | Shared | Static | Term  | Super | Leak  | Verdict                 |
++-----------------------------------------+--------+--------+-------+-------+-------+-------------------------+
+| App\Service\StatefulService             | YES    | NO     | NO    | NO    | NO    | ❌ KO (State Mutation)  |
+| App\Service\LocalStaticService          | YES    | YES    | NO    | NO    | NO    | ❌ KO (State Poison)    |
+| App\Controller\LeakDemoController       | YES    | YES    | YES   | YES   | YES   | ❌ KO (State Poison)    |
+| App\Service\TracerLeakDemoService       | YES    | NO     | NO    | NO    | NO    | ✅ OK (Stateless)       |
++-----------------------------------------+--------+--------+-------+-------+-------+-------------------------+
+```
+
+It fully loads and respects local and external baselines, allowing you to debug exactly why your active findings occur.
+
 ### 🛡️ Baseline Management
 
 In legacy projects or during initial integration, you might want to ignore existing findings to prevent CI pipeline failures and focus on new code. Igor supports baseline files with advanced checking and cleaning commands.
@@ -307,6 +336,17 @@ The `IgorPhpBundle` includes a `CompilerPass` that runs every time you clear you
     }
 }
 ```
+
+### 3. Semantic Return-Type Tracking (Transient Analysis)
+To prevent false positives on ephemeral objects (like OpenTelemetry Spans or Transient DTOs) returned by your shared services, Igor transitions from purely lexical checks (guessing based on method names) to **semantic type tracking**:
+
+- **Method Signature Parsing**: On the first call to any method on a service class, Igor locates the class's source file and parses its AST using Tree-Sitter to extract the declared PHP return types (including `self`, `static`, or nullable types) and resolves relative namespaces.
+- **Fast O(1) In-Memory Cache**: This extraction runs only once per class. The signatures are stored in a double-keyed in-memory map to guarantee lightning-fast diagnostics with zero disk I/O overhead on subsequent calls.
+- **Local Variable Type Propagation**: Igor tracks the types of local variables through assignment operations (e.g. `$span = $this->tracer->makeSpan();`).
+- **Transient vs. Shared Evaluation**: Igor then checks if the resolved return type represents a shared singleton service registered in the Symfony container.
+  - If the type is **NOT** a shared service (e.g., `Span`), Igor classifies it as a **transient/ephemeral object**.
+  - Subsequent mutations on this variable (e.g., `$span->setAttribute('key', 'value')`) are deemed **100% safe** and bypassed, ensuring zero false positives on safe request-scoped data.
+  - If the return type is indeed a shared service (e.g., a shared `EntityManager`), mutations remain strictly protected.
 
 ---
 

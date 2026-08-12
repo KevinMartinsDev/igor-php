@@ -163,6 +163,7 @@ func (b *SymfonyBridge) locateFilesViaReflection(jsonPart string) error {
 	}
 
 	reflectCmd := exec.Command("php", tmpHelper.Name(), b.Root)
+	reflectCmd.Dir = b.Root
 	reflectCmd.Stdin = bytes.NewReader([]byte(jsonPart))
 
 	var stdout bytes.Buffer

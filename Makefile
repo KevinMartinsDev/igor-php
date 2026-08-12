@@ -1,4 +1,4 @@
-.PHONY: build test lint ci clean run
+.PHONY: build test lint ci clean run explain debug
 
 # Build the main binary
 build:
@@ -6,8 +6,16 @@ build:
 
 # Run the binary locally on a target path (usage: make run path=test/fixtures or defaults to .)
 path ?= .
+filter ?=
 run: build
 	./bin/igor $(path)
+
+# Run semantic explanation diagnostics on a target path (usage: make explain path=test/fixtures filter=SuperService)
+explain: build
+	./bin/igor explain $(path) $(filter)
+
+# Alias to explain subcommand for debugging
+debug: explain
 
 # Run all tests
 test:
@@ -28,15 +36,15 @@ clean:
 
 # --- Docker Development Targets ---
 
-.PHONY: docker-build docker-test docker-lint docker-ci
+.PHONY: docker-build docker-test docker-lint docker-ci docker-explain docker-debug
 
 # Helper to run commands in the container with Go and golangci-lint caches mounted
 DOCKER_RUN = docker run --rm \
-	-v $(shell pwd):/app \
+	-v $(shell cd .. && pwd):$(shell cd .. && pwd) \
 	-v igor-go-cache:/root/.cache/go-build \
 	-v igor-go-mod:/go/pkg/mod \
 	-v igor-golangci-cache:/root/.cache/golangci-lint \
-	-w /app \
+	-w $(shell pwd) \
 	igor-dev
 
 # Build the development Docker image
@@ -58,5 +66,12 @@ docker-ci: docker-build
 # Run the binary within Docker on a target path (usage: make docker-run path=test/fixtures)
 docker-run: docker-build
 	$(DOCKER_RUN) make run path=$(path)
+
+# Run semantic explanation diagnostics within Docker (usage: make docker-explain path=test/fixtures filter=SuperService)
+docker-explain: docker-build
+	$(DOCKER_RUN) make explain path=$(path) filter=$(filter)
+
+# Alias to docker-explain subcommand for debugging inside Docker
+docker-debug: docker-explain
 
 

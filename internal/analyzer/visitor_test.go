@@ -11,7 +11,8 @@ import (
 
 // mockEngine implements the Engine interface for testing.
 type mockEngine struct {
-	auditedClasses []string
+	auditedClasses    []string
+	methodReturnTypes map[string]string
 }
 
 func (m *mockEngine) RecordClassAudited(name string) {
@@ -24,6 +25,24 @@ func (m *mockEngine) IsExplicitlyNonShared(_ string) bool {
 
 func (m *mockEngine) IsSafeNamespace(_ string) bool {
 	return false
+}
+
+func (m *mockEngine) GetMethodReturnType(className, methodName string) string {
+	if m.methodReturnTypes != nil {
+		key := className + "::" + methodName
+		if ret, exists := m.methodReturnTypes[key]; exists {
+			return ret
+		}
+	}
+	return ""
+}
+
+func (m *mockEngine) IsSharedService(className string) bool {
+	lower := strings.ToLower(className)
+	if strings.Contains(lower, "span") || strings.Contains(lower, "dto") {
+		return false
+	}
+	return true
 }
 
 func (m *mockEngine) IsResettable(className string) bool {
@@ -978,5 +997,56 @@ class DoctrineService {
 	}
 	if !foundChainedDisable {
 		t.Error("Expected a finding for chained disable call on EntityManager filters")
+	}
+}
+
+func TestPHPVisitor_SemanticTypeTracking(t *testing.T) {
+	code := `<?php
+class SuperService {
+    private \App\Tracing\TracerInterface $tracer;
+    private \App\Service\SomeSharedService $sharedService;
+
+    public function __construct(\App\Tracing\TracerInterface $tracer, \App\Service\SomeSharedService $sharedService) {
+        $this->tracer = $tracer;
+        $this->sharedService = $sharedService;
+    }
+
+    public function testTransientSpan() {
+        $span = $this->tracer->makeSpan();
+        $span->setAttribute('key', 'value'); // Safe: Span is transient
+    }
+
+    public function testSharedServiceMutation() {
+        $service = $this->sharedService->getSelf();
+        $service->setSomeValue('abc'); // Unsafe: someSharedService is a shared service!
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{
+		methodReturnTypes: map[string]string{
+			"App\\Tracing\\TracerInterface::makeSpan": "OpenTelemetry\\API\\Trace\\Span",
+			"App\\Service\\SomeSharedService::getSelf": "App\\Service\\SomeSharedService",
+		},
+	}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+
+	// We expect exactly 1 finding: for $service->setSomeValue('abc') since SomeSharedService is shared.
+	// We expect 0 findings for $span->setAttribute('key', 'value') since Span is not shared.
+	if len(findings) != 1 {
+		t.Fatalf("Expected exactly 1 finding, got %d: %v", len(findings), findings)
+	}
+
+	if !strings.Contains(findings[0].Snippet, "setSomeValue") {
+		t.Errorf("Expected finding to be on setSomeValue, got: %s", findings[0].Snippet)
 	}
 }
