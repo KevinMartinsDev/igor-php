@@ -282,9 +282,19 @@ func handleExplainSubcommand(args []string, configPath string) error {
 
 	fmt.Fprintf(os.Stderr, "🔍 Analyzing Igor's Semantics - Explain Matrix for: %s\n\n", rootPath)
 
-	// Collect and run audit (ignore baseline during explain so users can see all diagnoses!)
+	// Load Baseline if specified
 	var baseline config.Baseline
 	baseline.Files = make(map[string][]config.BaselineEntry)
+	if cfg.BaselinePath != "" {
+		baselineFile := cfg.BaselinePath
+		if !filepath.IsAbs(baselineFile) {
+			baselineFile = filepath.Join(rootPath, baselineFile)
+		}
+		if loaded, err := config.LoadBaseline(baselineFile); err == nil {
+			baseline = loaded
+			fmt.Fprintf(os.Stderr, "🛡️  Baseline loaded: %d files will be partially ignored in diagnostics.\n", len(baseline.Files))
+		}
+	}
 
 	auditList := collectFiles(rootPath, cfg, aud)
 	if len(auditList) == 0 {
