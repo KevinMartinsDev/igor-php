@@ -1,4 +1,4 @@
-.PHONY: build test lint ci clean run
+.PHONY: build test lint ci clean run explain debug
 
 # Build the main binary
 build:
@@ -8,6 +8,13 @@ build:
 path ?= .
 run: build
 	./bin/igor $(path)
+
+# Run semantic explanation diagnostics on a target path (usage: make explain path=test/fixtures or defaults to .)
+explain: build
+	./bin/igor explain $(path)
+
+# Alias to explain subcommand for debugging
+debug: explain
 
 # Run all tests
 test:
@@ -28,7 +35,7 @@ clean:
 
 # --- Docker Development Targets ---
 
-.PHONY: docker-build docker-test docker-lint docker-ci
+.PHONY: docker-build docker-test docker-lint docker-ci docker-explain docker-debug
 
 # Helper to run commands in the container with Go and golangci-lint caches mounted
 DOCKER_RUN = docker run --rm \
@@ -58,5 +65,12 @@ docker-ci: docker-build
 # Run the binary within Docker on a target path (usage: make docker-run path=test/fixtures)
 docker-run: docker-build
 	$(DOCKER_RUN) make run path=$(path)
+
+# Run semantic explanation diagnostics within Docker (usage: make docker-explain path=test/fixtures)
+docker-explain: docker-build
+	$(DOCKER_RUN) make explain path=$(path)
+
+# Alias to docker-explain subcommand for debugging inside Docker
+docker-debug: docker-explain
 
 
