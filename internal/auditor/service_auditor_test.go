@@ -153,11 +153,11 @@ func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
 		Aliases: map[string]interface{}{
 			"App\\Translator\\TranslatorInterface": ".abstract.instanceof.App\\Translator\\MyTranslator",
 			"App\\Service\\NonSharedInterface":     "App\\Service\\NonSharedService",
-			"App\\Service\\MapServiceAlias":       map[string]interface{}{"service": "App\\Service\\NonSharedService"},
-			"App\\Service\\MapIdAlias":            map[string]interface{}{"id": "App\\Service\\NonSharedService"},
-			"App\\Service\\MapTargetAlias":        map[string]interface{}{"target": "App\\Service\\NonSharedService"},
-			"App\\Service\\MapInvalidAlias":       map[string]interface{}{"invalid": "App\\Service\\NonSharedService"},
-			"App\\Service\\InvalidTypeAlias":      123,
+			"App\\Service\\MapServiceAlias":        map[string]interface{}{"service": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapIdAlias":             map[string]interface{}{"id": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapTargetAlias":         map[string]interface{}{"target": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapInvalidAlias":        map[string]interface{}{"invalid": "App\\Service\\NonSharedService"},
+			"App\\Service\\InvalidTypeAlias":       123,
 		},
 	}
 
@@ -453,12 +453,12 @@ func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
 
 	a.Symfony = &SymfonyBridge{
 		ClassToFile: map[string]string{
-			"App\\Service\\TraceTest\\TracerInterface": filePath,
-			"App\\Service\\TraceTest\\Span":            filePath,
+			"App\\Service\\TraceTest\\TracerInterface":   filePath,
+			"App\\Service\\TraceTest\\Span":              filePath,
 			"App\\Service\\TraceTest\\FakeEntityManager": filePath,
 			"App\\Service\\TraceTest\\SuperService":      filePath,
 			"App\\Service\\TraceTest\\UnsafeService":     filePath,
-			"Doctrine\\ORM\\EntityManagerInterface":               filePath,
+			"Doctrine\\ORM\\EntityManagerInterface":      filePath,
 		},
 		Container: &symbol.SymfonyContainer{
 			Definitions: map[string]symbol.SymfonyService{

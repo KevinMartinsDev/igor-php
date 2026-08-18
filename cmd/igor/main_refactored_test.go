@@ -433,9 +433,9 @@ func TestHandleAPIReview_OpenAIFallback(t *testing.T) {
 	// Expert mode with empty API Key env should print warning and exit cleanly (return nil)
 	cfg := config.Config{
 		LLMConfig: config.LLMConfig{
-			Provider:     "openai",
-			Model:        "gpt-4",
-			APIKeyEnv:    "IGOR_NON_EXISTENT_KEY_ENV",
+			Provider:  "openai",
+			Model:     "gpt-4",
+			APIKeyEnv: "IGOR_NON_EXISTENT_KEY_ENV",
 		},
 	}
 	// Make sure the env var is clean
