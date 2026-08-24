@@ -730,14 +730,6 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		fullName = v.namespace + "\\" + v.curClass
 	}
 
-	// If the service is explicitly transient (non-shared), mutations are accepted
-	if v.nonSharedServices[strings.TrimPrefix(fullName, "\\")] {
-		return
-	}
-	if v.engine != nil && (v.engine.IsExplicitlyNonShared(fullName) || v.engine.IsSafeNamespace(fullName)) {
-		return
-	}
-
 	// 1. Retrieve the calling receiver object and the method name
 	obj := n.ChildByFieldName("object")
 	if obj == nil {
@@ -754,6 +746,14 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		if receiverClass := v.resolveReceiverType(obj); receiverClass != "" {
 			v.engine.RecordMethodCall(fullName, v.curMethod, receiverClass, methodName)
 		}
+	}
+
+	// If the service is explicitly transient (non-shared), mutations are accepted
+	if v.nonSharedServices[strings.TrimPrefix(fullName, "\\")] {
+		return
+	}
+	if v.engine != nil && (v.engine.IsExplicitlyNonShared(fullName) || v.engine.IsSafeNamespace(fullName)) {
+		return
 	}
 
 	// 2. Check if the object/chain starts with a property of the current class ($this->propertyName)

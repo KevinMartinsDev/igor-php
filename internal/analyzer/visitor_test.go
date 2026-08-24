@@ -760,6 +760,44 @@ class CachingHttpClient {
 	}
 }
 
+func TestPHPVisitor_RecordsCallGraphEdgeForSafeNamespaceCaller(t *testing.T) {
+	code := `<?php
+namespace App;
+
+class SafeCaller {
+    private TargetService $target;
+
+    public function run() {
+        $this->target->mutate();
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockSafeNamespaceEngine{
+		safeNamespace: "App\\SafeCaller",
+	}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	if findings := v.Findings(); len(findings) > 0 {
+		t.Errorf("expected 0 findings inside safe namespace caller, got %d: %v", len(findings), findings)
+	}
+
+	want := "App\\SafeCaller::run -> App\\TargetService::mutate"
+	for _, call := range engine.recordedCalls {
+		if call == want {
+			return
+		}
+	}
+	t.Errorf("expected recordedCalls to contain %q, got %v", want, engine.recordedCalls)
+}
+
 func TestPHPVisitor_StaticMutationAndDependencies(t *testing.T) {
 	code := `<?php
 class MyStaticService {
@@ -778,7 +816,7 @@ class MyStaticService {
 
 	engine := &mockEngine{}
 	v := NewVisitor(content, engine)
-	
+
 	// Test SetDependencies
 	deps := []string{"App\\SomeDependency"}
 	v.SetDependencies(deps)
@@ -835,7 +873,7 @@ class AdvancedService {
 
 	engine := &mockEngine{}
 	v := NewVisitor(content, engine)
-	
+
 	var classNode *sitter.Node
 	for i := uint(0); i < tree.RootNode().ChildCount(); i++ {
 		child := tree.RootNode().Child(i)
@@ -1036,7 +1074,7 @@ class SuperService {
 
 	engine := &mockEngine{
 		methodReturnTypes: map[string]string{
-			"App\\Tracing\\TracerInterface::makeSpan": "OpenTelemetry\\API\\Trace\\Span",
+			"App\\Tracing\\TracerInterface::makeSpan":  "OpenTelemetry\\API\\Trace\\Span",
 			"App\\Service\\SomeSharedService::getSelf": "App\\Service\\SomeSharedService",
 		},
 	}
