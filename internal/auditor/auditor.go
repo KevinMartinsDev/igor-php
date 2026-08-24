@@ -24,6 +24,8 @@ type Auditor struct {
 	methodSignatureCache map[string]map[string]string
 	callGraph            map[string]map[string]bool
 	projectClasses       map[string]bool
+	classParents         map[string]string
+	declaredMethods      map[string]map[string]bool
 	mu                   sync.Mutex
 }
 
@@ -35,6 +37,8 @@ func NewAuditor(cfg config.Config) *Auditor {
 		methodSignatureCache: make(map[string]map[string]string),
 		callGraph:            make(map[string]map[string]bool),
 		projectClasses:       make(map[string]bool),
+		classParents:         make(map[string]string),
+		declaredMethods:      make(map[string]map[string]bool),
 	}
 }
 
@@ -71,6 +75,50 @@ func (a *Auditor) RecordMethodCall(callerClass, callerMethod, calleeClass, calle
 	a.callGraph[callerKey][calleeKey] = true
 }
 
+// RecordClassParent records a direct `extends` relationship (childClass extends
+// parentClass), used to conservatively promote reachability to inherited methods.
+func (a *Auditor) RecordClassParent(className, parentClassName string) {
+	if className == "" || parentClassName == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.classParents[normalizeClassName(className)] = normalizeClassName(parentClassName)
+}
+
+// RecordMethodDeclared records that methodName has its own declaration (body) on
+// className, distinguishing an override from an inherited, un-overridden method.
+func (a *Auditor) RecordMethodDeclared(className, methodName string) {
+	if className == "" || methodName == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := normalizeClassName(className)
+	if a.declaredMethods[key] == nil {
+		a.declaredMethods[key] = make(map[string]bool)
+	}
+	a.declaredMethods[key][methodName] = true
+}
+
+// resolveDeclaringAncestor walks the direct-`extends` parent chain starting at
+// class, looking for the nearest ancestor (including class itself) that
+// directly declares methodName. It stops as soon as it finds a declaration —
+// so an override on a subclass is never skipped in favor of a grandparent's
+// declaration — and guards against cycles in a malformed hierarchy. Returns
+// "" if no class in the chain declares the method.
+func (a *Auditor) resolveDeclaringAncestor(class, method string) string {
+	visited := make(map[string]bool)
+	for class != "" && !visited[class] {
+		if a.declaredMethods[class][method] {
+			return class
+		}
+		visited[class] = true
+		class = a.classParents[class]
+	}
+	return ""
+}
+
 func (a *Auditor) MarkReachability(results []symbol.AuditStatus) {
 	a.mu.Lock()
 	graph := a.callGraph
@@ -94,6 +142,25 @@ func (a *Auditor) MarkReachability(results []symbol.AuditStatus) {
 				reachableNodes[callee] = true
 				queue = append(queue, callee)
 			}
+		}
+	}
+
+	// Conservative inherited-method promotion: a reachable call on a class that
+	// doesn't declare the called method itself (i.e. it inherits it, directly or
+	// through multiple `extends` levels) also marks the declaring ancestor's own
+	// method as reachable. A class that overrides the method stops the walk at
+	// itself, so an override never promotes its own reachability onto the parent.
+	reachableSnapshot := make([]string, 0, len(reachableNodes))
+	for node := range reachableNodes {
+		reachableSnapshot = append(reachableSnapshot, node)
+	}
+	for _, node := range reachableSnapshot {
+		class, method, found := strings.Cut(node, "::")
+		if !found {
+			continue
+		}
+		if ancestor := a.resolveDeclaringAncestor(class, method); ancestor != "" && ancestor != class {
+			reachableNodes[ancestor+"::"+method] = true
 		}
 	}
 

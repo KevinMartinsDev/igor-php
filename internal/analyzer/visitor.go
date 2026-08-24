@@ -17,6 +17,14 @@ type Engine interface {
 	GetMethodReturnType(className, methodName string) string
 	IsSharedService(className string) bool
 	RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string)
+	// RecordClassParent records a direct `extends` relationship for a real class
+	// declaration (className extends parentClassName), used to conservatively
+	// resolve inherited-method reachability.
+	RecordClassParent(className, parentClassName string)
+	// RecordMethodDeclared records that methodName is directly declared on
+	// className, so the auditor can tell an inherited method apart from an
+	// override when walking the parent chain.
+	RecordMethodDeclared(className, methodName string)
 }
 
 type mutationInfo struct {
@@ -110,6 +118,13 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		v.finallyCleaned = make(map[string]bool)
 		v.localSharedVars = make(map[string]bool)
 		v.preScanFinallyCleanups(n)
+		if nodeType == "method_declaration" && v.curClass != "" && v.curMethod != "" && v.engine != nil {
+			fullName := v.curClass
+			if v.namespace != "" {
+				fullName = v.namespace + "\\" + v.curClass
+			}
+			v.engine.RecordMethodDeclared(fullName, v.curMethod)
+		}
 	case "assignment_expression", "augmented_assignment_expression":
 		v.handleAssignment(n)
 	case "update_expression":
@@ -165,6 +180,10 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 		v.engine.RecordClassAudited(fullName)
 	}
 
+	if n.Kind() == "class_declaration" {
+		v.recordClassParent(n, fullName)
+	}
+
 	classText := strings.ToLower(string(v.content[n.StartByte():n.EndByte()]))
 	headerEnd := strings.Index(classText, "{")
 	if headerEnd == -1 {
@@ -190,6 +209,25 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 
 	v.scanReadonlyProps(n)
 	v.scanPropertyTypes(n)
+}
+
+// recordClassParent extracts the single `extends` target from a class_declaration's
+// base_clause child (if any) and reports it to the engine, resolving the name
+// through the same use-import/namespace logic as property type-hints.
+func (v *PHPVisitor) recordClassParent(n *sitter.Node, fullName string) {
+	if v.engine == nil {
+		return
+	}
+	for i := uint(0); i < n.ChildCount(); i++ {
+		child := n.Child(i)
+		if child.Kind() != "base_clause" {
+			continue
+		}
+		if nameNode := child.NamedChild(0); nameNode != nil {
+			v.engine.RecordClassParent(fullName, v.resolveFQCN(v.getContent(nameNode)))
+		}
+		return
+	}
 }
 
 func (v *PHPVisitor) getClassBody(classNode *sitter.Node) *sitter.Node {

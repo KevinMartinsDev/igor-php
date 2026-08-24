@@ -365,7 +365,7 @@ Not every flagged mutator matters equally: a setter on a vendor class might neve
   275 | $this->binary = $binary;
 ```
 
-> 💡 **Known limitation**: reachability matching works on exact `Class::Method` pairs, so it doesn't currently follow interface/inheritance chains (a subclass that inherits, but doesn't override, a flagged parent method won't be linked through). Treat `[INFO]` as "no call site found *with this analysis*", not an absolute guarantee of dead code.
+> 💡 **Known limitation**: reachability matching works on exact `Class::Method` pairs. Igor conservatively follows direct and multi-level `extends` chains — a subclass that inherits, but doesn't override, a flagged parent method is linked through to the parent's finding, and an override correctly stops that promotion at the overriding class. It does **not** follow interfaces, traits, or magic methods (`__call`, `__get`, etc.), so a call resolved only through one of those still won't be linked through. Treat `[INFO]` as "no call site found *with this analysis*", not an absolute guarantee of dead code.
 
 ---
 
