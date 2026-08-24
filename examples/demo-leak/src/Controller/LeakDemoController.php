@@ -8,6 +8,7 @@ use App\Service\FakeEntityManager;
 use App\Service\IncompleteResetService;
 use App\Service\StatefulService;
 use App\Service\StaticLeakService;
+use App\Service\DestructorLeakService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -21,6 +22,7 @@ class LeakDemoController extends AbstractController
         private FakeEntityManager $entityManager,
         private ClosureLeakService $closureLeakService,
         private LocalStaticService $localStaticService,
+        private DestructorLeakService $destructorLeakService,
     ) {}
 
     #[Route('/', name: 'demo_index')]
@@ -43,6 +45,7 @@ class LeakDemoController extends AbstractController
                 <li><a href='/closure-leak'>8. Closure State Leak</a></li>
                 <li><a href='/local-static'>9. Local Static Variable</a></li>
                 <li><a href='/superglobals'>10. PHP Superglobals</a></li>
+                <li><a href='/destructor-leak' style='color: #fd7e14; font-weight: bold;'>11. Magic Method __destruct() Bypass (NEW)</a></li>
             </ul>
         ");
     }
@@ -326,6 +329,50 @@ class LeakDemoController extends AbstractController
                           "}";
                           
         return $this->renderLayout($html, true, null, $controllerCode);
+    }
+
+    #[Route('/destructor-leak')]
+    public function destructorLeak(): Response
+    {
+        if (isset($_GET['action']) && $_GET['action'] === 'clear') {
+            $this->destructorLeakService->clearLog();
+            return $this->redirect('/destructor-leak');
+        }
+
+        $logContent = $this->destructorLeakService->getLogContent();
+
+        $html = "<h2>11. Magic Method __destruct() Bypass</h2>
+                 <div style='background: #fff3cd; padding: 15px; border: 1px solid #ffeeba; border-radius: 5px; margin-bottom: 20px;'>
+                    <b>💡 Destructor Dilemma in Worker mode:</b><br>
+                    In worker mode, your services are instantiated once as singletons and stored in memory. 
+                    Because the process survives between requests, <b>the destructor is never called</b>!<br>
+                    Any resource cleanup (like closing files, databases, flushing buffers) written in <code>__destruct()</code> will never run per-request.
+                 </div>
+                 
+                 <div style='background: #f8f9fa; padding: 15px; border-left: 5px solid #007bff; margin-bottom: 20px;'>
+                    <b>🔍 The Experiment:</b><br>
+                    1. Click <b>\"Clear Log File\"</b> below to start fresh.<br>
+                    2. In <b>Classic mode (port 8081)</b>, refresh the page. Notice how every single refresh appends BOTH <code>🟢 Constructor called</code> AND <code>🔴 Destructor called</code> because PHP destroys the service at the end of every request.<br>
+                    3. In <b>Worker mode (port 8080)</b>, refresh the page. Only <code>🟢 Constructor called</code> will appear (the very first time the worker starts), but <code>🔴 Destructor called</code> is **NEVER** called!
+                 </div>
+
+                 <div style='margin-bottom: 20px;'>
+                    <button onclick='window.location.reload()' style='padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;'>🔄 Refresh Request (F5)</button>
+                    <a href='/destructor-leak?action=clear' style='display: inline-block; padding: 10px 20px; background: #dc3545; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-left: 10px;'>🗑️ Clear Log File</a>
+                 </div>
+                 
+                 <h3>📄 Life-cycle Event Log File (var/destructor_demo.log):</h3>
+                 <pre style='background: #1a202c; color: #f7fafc; padding: 15px; border-radius: 5px; font-family: monospace; font-size: 0.95em; overflow-x: auto;'>".htmlspecialchars($logContent, ENT_QUOTES, 'UTF-8')."</pre>";
+
+        $controllerCode = "<?php\n" .
+                          "// Inside LeakDemoController.php:\n" .
+                          "#[Route('/destructor-leak')]\n" .
+                          "public function destructorLeak(): Response {\n" .
+                          "    // Read the log written to disk by __construct() and __destruct()\n" .
+                          "    \$logContent = \$this->destructorLeakService->getLogContent();\n" .
+                          "}";
+
+        return $this->renderLayout($html, true, 'src/Service/DestructorLeakService.php', $controllerCode);
     }
 
     private function renderLayout(string $content, bool $showBack = false, ?string $codeFile = null, ?string $customCode = null): Response

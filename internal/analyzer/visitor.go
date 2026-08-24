@@ -105,14 +105,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 	case "class_declaration", "trait_declaration", "anonymous_class":
 		v.handleClass(n)
 	case "method_declaration", "function_definition":
-		if nameNode := n.ChildByFieldName("name"); nameNode != nil {
-			v.curMethod = v.getContent(nameNode)
-		}
-		v.isWorkerSafeMethod = v.hasAttribute(n, "WorkerSafe")
-		v.finallyCleaned = make(map[string]bool)
-		v.localSharedVars = make(map[string]bool)
-		v.preScanFinallyCleanups(n)
-		v.recordMethodDeclaration(nodeType)
+		v.handleMethodOrFunction(n, nodeType)
 	case "assignment_expression", "augmented_assignment_expression":
 		v.handleAssignment(n)
 	case "update_expression":
@@ -156,6 +149,33 @@ func (v *PHPVisitor) recordMethodDeclaration(nodeType string) {
 		fullName = v.namespace + "\\" + v.curClass
 	}
 	v.engine.RecordMethodDeclared(fullName, v.curMethod)
+}
+
+func (v *PHPVisitor) handleMethodOrFunction(n *sitter.Node, nodeType string) {
+	if nameNode := n.ChildByFieldName("name"); nameNode != nil {
+		v.curMethod = v.getContent(nameNode)
+	}
+	v.isWorkerSafeMethod = v.hasAttribute(n, "WorkerSafe")
+	v.finallyCleaned = make(map[string]bool)
+	v.localSharedVars = make(map[string]bool)
+	v.preScanFinallyCleanups(n)
+	v.recordMethodDeclaration(nodeType)
+
+	if nodeType == "method_declaration" && strings.ToLower(v.curMethod) == "__destruct" {
+		fullName := v.curClass
+		if v.namespace != "" {
+			fullName = v.namespace + "\\" + v.curClass
+		}
+		isTransient := false
+		if v.nonSharedServices[strings.TrimPrefix(fullName, "\\")] {
+			isTransient = true
+		} else if v.engine != nil && (v.engine.IsExplicitlyNonShared(fullName) || v.engine.IsSafeNamespace(fullName)) {
+			isTransient = true
+		}
+		if !isTransient {
+			v.addFinding(n, "Usage of __destruct() magic method is dangerous in Worker mode.", "Destructors on shared services are not invoked at the end of each request in Worker mode.", "ERROR")
+		}
+	}
 }
 
 func (v *PHPVisitor) handleNamespace(n *sitter.Node) {
