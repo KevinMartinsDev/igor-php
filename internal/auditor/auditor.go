@@ -141,16 +141,6 @@ func (a *Auditor) MarkReachability(results []symbol.AuditStatus) {
 		}
 	}
 
-	// Fixed-point worklist over both call-graph edges and inherited-method
-	// promotion. A reachable call on a class that doesn't declare the called
-	// method itself (i.e. it inherits it, directly or through multiple
-	// `extends` levels) also marks the declaring ancestor's own method as
-	// reachable. A class that overrides the method stops the walk at itself,
-	// so an override never promotes its own reachability onto the parent.
-	// Promoted ancestor nodes are enqueued just like any other newly reachable
-	// node, so their own outgoing call-graph edges (e.g. an inherited method
-	// calling a sibling method via `$this->`) are followed in turn. The loop
-	// only terminates once a pass adds nothing new, i.e. the queue drains.
 	for len(queue) > 0 {
 		node := queue[0]
 		queue = queue[1:]

@@ -17,13 +17,7 @@ type Engine interface {
 	GetMethodReturnType(className, methodName string) string
 	IsSharedService(className string) bool
 	RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string)
-	// RecordClassParent records a direct `extends` relationship for a real class
-	// declaration (className extends parentClassName), used to conservatively
-	// resolve inherited-method reachability.
 	RecordClassParent(className, parentClassName string)
-	// RecordMethodDeclared records that methodName is directly declared on
-	// className, so the auditor can tell an inherited method apart from an
-	// override when walking the parent chain.
 	RecordMethodDeclared(className, methodName string)
 }
 

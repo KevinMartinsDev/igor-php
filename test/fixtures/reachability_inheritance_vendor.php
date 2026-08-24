@@ -67,14 +67,8 @@ class GeneratorBaseService
 
 class GeneratorMiddleService extends GeneratorBaseService
 {
-    // Inherits getOutputFromHtml() and createTemporaryFile() without overriding either.
 }
 
 class GeneratorLeafService extends GeneratorMiddleService
 {
-    // Third inheritance level: still does not override anything. Only
-    // getOutputFromHtml() is called directly from app code; promoting it to
-    // GeneratorBaseService must also make the graph edge to
-    // createTemporaryFile() (reached only via `$this->` on the ancestor)
-    // reachable in turn.
 }
