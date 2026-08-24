@@ -1090,7 +1090,7 @@ class SuperService {
 
 	engine := &mockEngine{
 		methodReturnTypes: map[string]string{
-			"App\\Tracing\\TracerInterface::makeSpan":  "OpenTelemetry\\API\\Trace\\Span",
+        "App\\Tracing\\TracerInterface::makeSpan": "OpenTelemetry\\API\\Trace\\Span",
 			"App\\Service\\SomeSharedService::getSelf": "App\\Service\\SomeSharedService",
 		},
 	}

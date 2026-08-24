@@ -112,13 +112,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		v.finallyCleaned = make(map[string]bool)
 		v.localSharedVars = make(map[string]bool)
 		v.preScanFinallyCleanups(n)
-		if nodeType == "method_declaration" && v.curClass != "" && v.curMethod != "" && v.engine != nil {
-			fullName := v.curClass
-			if v.namespace != "" {
-				fullName = v.namespace + "\\" + v.curClass
-			}
-			v.engine.RecordMethodDeclared(fullName, v.curMethod)
-		}
+		v.recordMethodDeclaration(nodeType)
 	case "assignment_expression", "augmented_assignment_expression":
 		v.handleAssignment(n)
 	case "update_expression":
@@ -150,6 +144,18 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 	case "method_declaration", "function_definition":
 		v.curMethod, v.isWorkerSafeMethod, v.finallyCleaned = oldMethod, oldIsWorkerSafeMethod, oldFinallyCleaned
 	}
+}
+
+func (v *PHPVisitor) recordMethodDeclaration(nodeType string) {
+	if nodeType != "method_declaration" || v.curClass == "" || v.curMethod == "" || v.engine == nil {
+		return
+	}
+
+	fullName := v.curClass
+	if v.namespace != "" {
+		fullName = v.namespace + "\\" + v.curClass
+	}
+	v.engine.RecordMethodDeclared(fullName, v.curMethod)
 }
 
 func (v *PHPVisitor) handleNamespace(n *sitter.Node) {
