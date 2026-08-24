@@ -31,6 +31,7 @@ Like the legendary assistant, `igor` checks every connection and part of your ap
 - **🛡️ Safety First**: Catches dangerous `exit()` or `die()` calls, and warns about **PHP Superglobals** (`$_GET`, `$_POST`, etc.) or **local static variables** that could leak state between requests.
 - **🔇 Zero Noise**: Automatically ignores `Symfony\` and `Doctrine\` namespaces, and common data folders (`Entity`, `Dto`, `ApiResource`).
 - **📦 Project vs. Vendor**: Clear separation between your code and third-party dependencies, with tailored recommendations for each.
+- **🎯 Reachability Ranking**: Cross-references every flagged mutator against your own call graph. Findings actually reachable from your application code are tagged `[HIGH]` and surface first; findings with no call site found are tagged `[INFO]`.
 - **🎯 Selective Ignore**: Skip specific lines using the `// @igor-ignore` comment, or target entire classes, methods, and properties using modern **PHP 8 Attributes** (`#[WorkerSafe]`).
 - Bridge-Agnostic Bridge**: Not on Symfony? Feed Igor your container's service graph via `--container-dump <file.json>` so it skips transient (non-shared) value objects and per-request helpers — the same precision the Symfony bridge gives, for **any** framework (Laravel, Laminas, …).
 
@@ -347,6 +348,24 @@ To prevent false positives on ephemeral objects (like OpenTelemetry Spans or Tra
   - If the type is **NOT** a shared service (e.g., `Span`), Igor classifies it as a **transient/ephemeral object**.
   - Subsequent mutations on this variable (e.g., `$span->setAttribute('key', 'value')`) are deemed **100% safe** and bypassed, ensuring zero false positives on safe request-scoped data.
   - If the return type is indeed a shared service (e.g., a shared `EntityManager`), mutations remain strictly protected.
+
+### 4. Call-Site Reachability Ranking
+Not every flagged mutator matters equally: a setter on a vendor class might never be called anywhere in your application, while another is hit on every request. Igor ranks findings accordingly:
+
+- **Call-Graph Construction**: While auditing each file, Igor records a call-graph edge for every method call whose receiver resolves to a known class — including `$this->service->method()` chains and internal `$this->otherMethod()` self-calls.
+- **BFS from Application Code**: Igor walks this graph starting from every method declared in your own project files (not `vendor/`), following calls transitively (e.g. `Controller::action()` → `Service::doWork()` → `VendorClass::mutate()`).
+- **Ranking**: Each finding is tagged `[HIGH]` if its method is reachable from this walk, or `[INFO]` if no call site was found anywhere in the audited codebase. `[HIGH]` findings are printed first within each file so the actionable bugs surface before the noise.
+
+```text
+📂 vendor/knp/snappy/src/Knp/Snappy/AbstractGenerator.php
+  [VENDOR] [HIGH] Mutation of state 'temporaryFiles' in AbstractGenerator::createTemporaryFile()
+  513 | $this->temporaryFiles[] = $filename;
+
+  [VENDOR] [INFO] Mutation of state 'binary' in AbstractGenerator::setBinary()
+  275 | $this->binary = $binary;
+```
+
+> 💡 **Known limitation**: reachability matching works on exact `Class::Method` pairs. Igor conservatively follows direct and multi-level `extends` chains — a subclass that inherits, but doesn't override, a flagged parent method is linked through to the parent's finding, and an override correctly stops that promotion at the overriding class. It does **not** follow interfaces, traits, or magic methods (`__call`, `__get`, etc.), so a call resolved only through one of those still won't be linked through. Treat `[INFO]` as "no call site found *with this analysis*", not an absolute guarantee of dead code.
 
 ---
 

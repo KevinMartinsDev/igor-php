@@ -7,14 +7,17 @@ import (
 
 // Finding represents a single issue detected by the linter.
 type Finding struct {
-	Message      string   `json:"message"`
-	Code         string   `json:"code"`
-	Snippet      string   `json:"snippet"`
-	Remediation  string   `json:"remediation"`
-	Severity     string   `json:"severity"` // "ERROR" or "WARNING"
-	Line         int      `json:"line"`
-	ASTDetails   string   `json:"ast_details"`
-	Dependencies []string `json:"dependencies"`
+	Message       string   `json:"message"`
+	Code          string   `json:"code"`
+	Snippet       string   `json:"snippet"`
+	Remediation   string   `json:"remediation"`
+	Severity      string   `json:"severity"` // "ERROR" or "WARNING"
+	Line          int      `json:"line"`
+	ASTDetails    string   `json:"ast_details"`
+	Dependencies  []string `json:"dependencies"`
+	ContextClass  string   `json:"context_class,omitempty"`
+	ContextMethod string   `json:"context_method,omitempty"`
+	Reachability  string   `json:"reachability,omitempty"`
 }
 
 // Result groups findings by file.

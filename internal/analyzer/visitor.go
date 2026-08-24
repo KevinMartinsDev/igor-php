@@ -16,6 +16,9 @@ type Engine interface {
 	IsResettable(className string) bool
 	GetMethodReturnType(className, methodName string) string
 	IsSharedService(className string) bool
+	RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string)
+	RecordClassParent(className, parentClassName string)
+	RecordMethodDeclared(className, methodName string)
 }
 
 type mutationInfo struct {
@@ -109,6 +112,7 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 		v.finallyCleaned = make(map[string]bool)
 		v.localSharedVars = make(map[string]bool)
 		v.preScanFinallyCleanups(n)
+		v.recordMethodDeclaration(nodeType)
 	case "assignment_expression", "augmented_assignment_expression":
 		v.handleAssignment(n)
 	case "update_expression":
@@ -142,6 +146,18 @@ func (v *PHPVisitor) walk(n *sitter.Node) {
 	}
 }
 
+func (v *PHPVisitor) recordMethodDeclaration(nodeType string) {
+	if nodeType != "method_declaration" || v.curClass == "" || v.curMethod == "" || v.engine == nil {
+		return
+	}
+
+	fullName := v.curClass
+	if v.namespace != "" {
+		fullName = v.namespace + "\\" + v.curClass
+	}
+	v.engine.RecordMethodDeclared(fullName, v.curMethod)
+}
+
 func (v *PHPVisitor) handleNamespace(n *sitter.Node) {
 	if nameNode := n.ChildByFieldName("name"); nameNode != nil {
 		v.namespace = v.getContent(nameNode)
@@ -162,6 +178,10 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 
 	if v.engine != nil {
 		v.engine.RecordClassAudited(fullName)
+	}
+
+	if n.Kind() == "class_declaration" {
+		v.recordClassParent(n, fullName)
 	}
 
 	classText := strings.ToLower(string(v.content[n.StartByte():n.EndByte()]))
@@ -189,6 +209,25 @@ func (v *PHPVisitor) handleClass(n *sitter.Node) {
 
 	v.scanReadonlyProps(n)
 	v.scanPropertyTypes(n)
+}
+
+// recordClassParent extracts the single `extends` target from a class_declaration's
+// base_clause child (if any) and reports it to the engine, resolving the name
+// through the same use-import/namespace logic as property type-hints.
+func (v *PHPVisitor) recordClassParent(n *sitter.Node, fullName string) {
+	if v.engine == nil {
+		return
+	}
+	for i := uint(0); i < n.ChildCount(); i++ {
+		child := n.Child(i)
+		if child.Kind() != "base_clause" {
+			continue
+		}
+		if nameNode := child.NamedChild(0); nameNode != nil {
+			v.engine.RecordClassParent(fullName, v.resolveFQCN(v.getContent(nameNode)))
+		}
+		return
+	}
 }
 
 func (v *PHPVisitor) getClassBody(classNode *sitter.Node) *sitter.Node {
@@ -511,6 +550,13 @@ func (v *PHPVisitor) resolveReceiverType(n *sitter.Node) string {
 	// Case 2: variable, e.g. $tracer
 	if kind == "variable" || kind == "variable_name" {
 		content := v.getContent(n)
+		if content == "$this" {
+			fullName := v.curClass
+			if v.namespace != "" {
+				fullName = v.namespace + "\\" + v.curClass
+			}
+			return fullName
+		}
 		if typeName, exists := v.localVarTypes[content]; exists {
 			return v.resolveFQCN(typeName)
 		}
@@ -592,6 +638,11 @@ func (v *PHPVisitor) logMutation(n *sitter.Node, prop string, static bool) {
 }
 
 func (v *PHPVisitor) performResetCheck() {
+	fullName := v.curClass
+	if v.namespace != "" {
+		fullName = v.namespace + "\\" + v.curClass
+	}
+
 	for prop, info := range v.mutated {
 		if v.workerSafeProps[prop] {
 			continue
@@ -605,14 +656,16 @@ func (v *PHPVisitor) performResetCheck() {
 		}
 		if !v.resetted[prop] {
 			v.findings = append(v.findings, symbol.Finding{
-				Message:      fmt.Sprintf("Property '%s' of %s is mutated but not reset in reset().", prop, v.curClass),
-				Severity:     "WARNING",
-				Line:         info.line,
-				Code:         info.code,
-				Snippet:      info.snippet,
-				ASTDetails:   info.astDetails,
-				Dependencies: v.dependencies,
-				Remediation:  fmt.Sprintf("Add '$this->%s = ...' in the reset() method.", prop),
+				Message:       fmt.Sprintf("Property '%s' of %s is mutated but not reset in reset().", prop, v.curClass),
+				Severity:      "WARNING",
+				Line:          info.line,
+				Code:          info.code,
+				Snippet:       info.snippet,
+				ASTDetails:    info.astDetails,
+				Dependencies:  v.dependencies,
+				Remediation:   fmt.Sprintf("Add '$this->%s = ...' in the reset() method.", prop),
+				ContextClass:  fullName,
+				ContextMethod: v.curMethod,
 			})
 		}
 	}
@@ -643,14 +696,16 @@ func (v *PHPVisitor) addFinding(n *sitter.Node, msg, hint, severity string) {
 	}
 
 	v.findings = append(v.findings, symbol.Finding{
-		Message:      msg,
-		Line:         row + 1,
-		Code:         v.lines[row],
-		Snippet:      v.getContent(n),
-		ASTDetails:   n.ToSexp(),
-		Dependencies: v.dependencies,
-		Remediation:  hint,
-		Severity:     severity,
+		Message:       msg,
+		Line:          row + 1,
+		Code:          v.lines[row],
+		Snippet:       v.getContent(n),
+		ASTDetails:    n.ToSexp(),
+		Dependencies:  v.dependencies,
+		Remediation:   hint,
+		Severity:      severity,
+		ContextClass:  fullName,
+		ContextMethod: v.curMethod,
 	})
 }
 
@@ -713,14 +768,6 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		fullName = v.namespace + "\\" + v.curClass
 	}
 
-	// If the service is explicitly transient (non-shared), mutations are accepted
-	if v.nonSharedServices[strings.TrimPrefix(fullName, "\\")] {
-		return
-	}
-	if v.engine != nil && (v.engine.IsExplicitlyNonShared(fullName) || v.engine.IsSafeNamespace(fullName)) {
-		return
-	}
-
 	// 1. Retrieve the calling receiver object and the method name
 	obj := n.ChildByFieldName("object")
 	if obj == nil {
@@ -732,6 +779,20 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		return
 	}
 	methodName := v.getContent(nameNode)
+
+	if v.engine != nil {
+		if receiverClass := v.resolveReceiverType(obj); receiverClass != "" {
+			v.engine.RecordMethodCall(fullName, v.curMethod, receiverClass, methodName)
+		}
+	}
+
+	// If the service is explicitly transient (non-shared), mutations are accepted
+	if v.nonSharedServices[strings.TrimPrefix(fullName, "\\")] {
+		return
+	}
+	if v.engine != nil && (v.engine.IsExplicitlyNonShared(fullName) || v.engine.IsSafeNamespace(fullName)) {
+		return
+	}
 
 	// 2. Check if the object/chain starts with a property of the current class ($this->propertyName)
 	propName, isProp := v.resolveRootProperty(obj)

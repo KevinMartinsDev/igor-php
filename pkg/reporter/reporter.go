@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -110,7 +111,13 @@ func (r *CLIReporter) PrintFindings(res symbol.AuditStatus, projectRoot string, 
 		fmt.Printf("   \033[90mService: %s\033[0m\n", res.ServiceID)
 	}
 
-	for _, f := range res.Findings {
+	findings := make([]symbol.Finding, len(res.Findings))
+	copy(findings, res.Findings)
+	sort.SliceStable(findings, func(i, j int) bool {
+		return findings[i].Reachability == "HIGH" && findings[j].Reachability != "HIGH"
+	})
+
+	for _, f := range findings {
 		severity := "error"
 		color := "\033[31m" // Red for Error
 		if f.Severity == "WARNING" {
@@ -124,8 +131,16 @@ func (r *CLIReporter) PrintFindings(res symbol.AuditStatus, projectRoot string, 
 			sourceIndicator = "\033[33m[VENDOR]\033[0m"
 		}
 
+		rankTag := ""
+		switch f.Reachability {
+		case "HIGH":
+			rankTag = " \033[1;31m[HIGH]\033[0m"
+		case "INFO":
+			rankTag = " \033[90m[INFO]\033[0m"
+		}
+
 		// Standard CLI output
-		fmt.Printf("  %s %s%s\033[0m\n", sourceIndicator, color, f.Message)
+		fmt.Printf("  %s%s %s%s\033[0m\n", sourceIndicator, rankTag, color, f.Message)
 		fmt.Printf("  \033[90m%d | %s\033[0m\n", f.Line, strings.TrimSpace(f.Code))
 
 		if f.Remediation != "" {

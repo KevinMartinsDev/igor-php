@@ -22,6 +22,10 @@ type Auditor struct {
 	NonSharedServices    analyzer.NonSharedServiceMap
 	AuditedClasses       map[string]bool
 	methodSignatureCache map[string]map[string]string
+	callGraph            map[string]map[string]bool
+	projectClasses       map[string]bool
+	classParents         map[string]string
+	declaredMethods      map[string]map[string]bool
 	mu                   sync.Mutex
 }
 
@@ -31,6 +35,142 @@ func NewAuditor(cfg config.Config) *Auditor {
 		Config:               cfg,
 		AuditedClasses:       make(map[string]bool),
 		methodSignatureCache: make(map[string]map[string]string),
+		callGraph:            make(map[string]map[string]bool),
+		projectClasses:       make(map[string]bool),
+		classParents:         make(map[string]string),
+		declaredMethods:      make(map[string]map[string]bool),
+	}
+}
+
+type fileEngine struct {
+	*Auditor
+	isVendor bool
+}
+
+func (f *fileEngine) RecordClassAudited(name string) {
+	f.Auditor.RecordClassAudited(name)
+	if !f.isVendor {
+		f.Auditor.recordProjectClass(name)
+	}
+}
+
+func (a *Auditor) recordProjectClass(name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.projectClasses[normalizeClassName(name)] = true
+}
+
+func (a *Auditor) RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string) {
+	if callerMethod == "" || calleeMethod == "" {
+		return
+	}
+	callerKey := normalizeClassName(callerClass) + "::" + callerMethod
+	calleeKey := normalizeClassName(calleeClass) + "::" + calleeMethod
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.callGraph[callerKey] == nil {
+		a.callGraph[callerKey] = make(map[string]bool)
+	}
+	a.callGraph[callerKey][calleeKey] = true
+}
+
+// RecordClassParent records a direct `extends` relationship (childClass extends
+// parentClass), used to conservatively promote reachability to inherited methods.
+func (a *Auditor) RecordClassParent(className, parentClassName string) {
+	if className == "" || parentClassName == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.classParents[normalizeClassName(className)] = normalizeClassName(parentClassName)
+}
+
+// RecordMethodDeclared records that methodName has its own declaration (body) on
+// className, distinguishing an override from an inherited, un-overridden method.
+func (a *Auditor) RecordMethodDeclared(className, methodName string) {
+	if className == "" || methodName == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := normalizeClassName(className)
+	if a.declaredMethods[key] == nil {
+		a.declaredMethods[key] = make(map[string]bool)
+	}
+	a.declaredMethods[key][methodName] = true
+}
+
+// resolveDeclaringAncestor walks the direct-`extends` parent chain starting at
+// class, looking for the nearest ancestor (including class itself) that
+// directly declares methodName. It stops as soon as it finds a declaration —
+// so an override on a subclass is never skipped in favor of a grandparent's
+// declaration — and guards against cycles in a malformed hierarchy. Returns
+// "" if no class in the chain declares the method.
+func (a *Auditor) resolveDeclaringAncestor(class, method string) string {
+	visited := make(map[string]bool)
+	for class != "" && !visited[class] {
+		if a.declaredMethods[class][method] {
+			return class
+		}
+		visited[class] = true
+		class = a.classParents[class]
+	}
+	return ""
+}
+
+func (a *Auditor) MarkReachability(results []symbol.AuditStatus) {
+	a.mu.Lock()
+	graph := a.callGraph
+	projectClasses := a.projectClasses
+	a.mu.Unlock()
+
+	reachableNodes := make(map[string]bool)
+	var queue []string
+	enqueue := func(node string) {
+		if !reachableNodes[node] {
+			reachableNodes[node] = true
+			queue = append(queue, node)
+		}
+	}
+
+	for callerKey := range graph {
+		callerClass, _, found := strings.Cut(callerKey, "::")
+		if found && projectClasses[callerClass] {
+			enqueue(callerKey)
+		}
+	}
+
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+
+		for callee := range graph[node] {
+			enqueue(callee)
+		}
+
+		class, method, found := strings.Cut(node, "::")
+		if !found {
+			continue
+		}
+		if ancestor := a.resolveDeclaringAncestor(class, method); ancestor != "" && ancestor != class {
+			enqueue(ancestor + "::" + method)
+		}
+	}
+
+	for i := range results {
+		for j := range results[i].Findings {
+			finding := &results[i].Findings[j]
+			if finding.ContextClass == "" || finding.ContextMethod == "" {
+				continue
+			}
+			findingKey := normalizeClassName(finding.ContextClass) + "::" + finding.ContextMethod
+			if reachableNodes[findingKey] {
+				finding.Reachability = "HIGH"
+			} else {
+				finding.Reachability = "INFO"
+			}
+		}
 	}
 }
 
@@ -53,12 +193,28 @@ func (a *Auditor) Audit(path string, dependencies []string) ([]symbol.Finding, e
 	}
 	defer tree.Close()
 
-	v := analyzer.NewVisitor(content, a)
+	v := analyzer.NewVisitor(content, &fileEngine{
+		Auditor:  a,
+		isVendor: isVendorPath(a.Config.NormalizePath(path)),
+	})
 	v.SetDependencies(dependencies)
 	v.SetNonSharedServices(a.NonSharedServices)
 	v.Walk(tree.RootNode())
 
 	return v.Findings(), nil
+}
+
+func isVendorPath(path string) bool {
+	p := filepath.ToSlash(path)
+	if strings.Contains(p, "/vendor/") || strings.HasPrefix(p, "vendor/") {
+		return true
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		if strings.Contains(filepath.ToSlash(abs), "/vendor/") {
+			return true
+		}
+	}
+	return false
 }
 
 // ExtractFQCN extracts the full class name from a file.

@@ -13,6 +13,27 @@ import (
 type mockEngine struct {
 	auditedClasses    []string
 	methodReturnTypes map[string]string
+	recordedCalls     []string
+	recordedParents   map[string]string
+	declaredMethods   map[string][]string
+}
+
+func (m *mockEngine) RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string) {
+	m.recordedCalls = append(m.recordedCalls, callerClass+"::"+callerMethod+" -> "+calleeClass+"::"+calleeMethod)
+}
+
+func (m *mockEngine) RecordClassParent(className, parentClassName string) {
+	if m.recordedParents == nil {
+		m.recordedParents = make(map[string]string)
+	}
+	m.recordedParents[className] = parentClassName
+}
+
+func (m *mockEngine) RecordMethodDeclared(className, methodName string) {
+	if m.declaredMethods == nil {
+		m.declaredMethods = make(map[string][]string)
+	}
+	m.declaredMethods[className] = append(m.declaredMethods[className], methodName)
 }
 
 func (m *mockEngine) RecordClassAudited(name string) {
@@ -755,6 +776,44 @@ class CachingHttpClient {
 	}
 }
 
+func TestPHPVisitor_RecordsCallGraphEdgeForSafeNamespaceCaller(t *testing.T) {
+	code := `<?php
+namespace App;
+
+class SafeCaller {
+    private TargetService $target;
+
+    public function run() {
+        $this->target->mutate();
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockSafeNamespaceEngine{
+		safeNamespace: "App\\SafeCaller",
+	}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	if findings := v.Findings(); len(findings) > 0 {
+		t.Errorf("expected 0 findings inside safe namespace caller, got %d: %v", len(findings), findings)
+	}
+
+	want := "App\\SafeCaller::run -> App\\TargetService::mutate"
+	for _, call := range engine.recordedCalls {
+		if call == want {
+			return
+		}
+	}
+	t.Errorf("expected recordedCalls to contain %q, got %v", want, engine.recordedCalls)
+}
+
 func TestPHPVisitor_StaticMutationAndDependencies(t *testing.T) {
 	code := `<?php
 class MyStaticService {
@@ -773,7 +832,7 @@ class MyStaticService {
 
 	engine := &mockEngine{}
 	v := NewVisitor(content, engine)
-	
+
 	// Test SetDependencies
 	deps := []string{"App\\SomeDependency"}
 	v.SetDependencies(deps)
@@ -830,7 +889,7 @@ class AdvancedService {
 
 	engine := &mockEngine{}
 	v := NewVisitor(content, engine)
-	
+
 	var classNode *sitter.Node
 	for i := uint(0); i < tree.RootNode().ChildCount(); i++ {
 		child := tree.RootNode().Child(i)
@@ -1031,7 +1090,7 @@ class SuperService {
 
 	engine := &mockEngine{
 		methodReturnTypes: map[string]string{
-			"App\\Tracing\\TracerInterface::makeSpan": "OpenTelemetry\\API\\Trace\\Span",
+        "App\\Tracing\\TracerInterface::makeSpan": "OpenTelemetry\\API\\Trace\\Span",
 			"App\\Service\\SomeSharedService::getSelf": "App\\Service\\SomeSharedService",
 		},
 	}
@@ -1048,5 +1107,156 @@ class SuperService {
 
 	if !strings.Contains(findings[0].Snippet, "setSomeValue") {
 		t.Errorf("Expected finding to be on setSomeValue, got: %s", findings[0].Snippet)
+	}
+}
+
+func TestPHPVisitor_ClassInheritance_DirectExtends(t *testing.T) {
+	code := `<?php
+namespace App\Service;
+
+use Vendor\Lib\BaseService;
+
+class ChildService extends BaseService
+{
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	got := engine.recordedParents["App\\Service\\ChildService"]
+	want := "Vendor\\Lib\\BaseService"
+	if got != want {
+		t.Errorf("expected ChildService parent %q, got %q (all: %v)", want, got, engine.recordedParents)
+	}
+}
+
+func TestPHPVisitor_ClassInheritance_MultiLevel(t *testing.T) {
+	code := `<?php
+namespace App\Service;
+
+class GrandParentService
+{
+}
+
+class ParentService extends GrandParentService
+{
+}
+
+class ChildService extends ParentService
+{
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	if got := engine.recordedParents["App\\Service\\ChildService"]; got != "App\\Service\\ParentService" {
+		t.Errorf("expected ChildService parent App\\Service\\ParentService, got %q", got)
+	}
+	if got := engine.recordedParents["App\\Service\\ParentService"]; got != "App\\Service\\GrandParentService" {
+		t.Errorf("expected ParentService parent App\\Service\\GrandParentService, got %q", got)
+	}
+	if _, exists := engine.recordedParents["App\\Service\\GrandParentService"]; exists {
+		t.Errorf("expected GrandParentService to have no recorded parent, got %v", engine.recordedParents)
+	}
+}
+
+func TestPHPVisitor_ClassInheritance_NotRecordedForTraitsAnonymousOrImplementsOnly(t *testing.T) {
+	code := `<?php
+namespace App\Service;
+
+trait MyTrait
+{
+}
+
+interface MyInterface
+{
+}
+
+class ImplementsOnly implements MyInterface
+{
+}
+
+class AnonHost
+{
+    public function make()
+    {
+        return new class extends \ArrayObject {
+        };
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	if len(engine.recordedParents) != 0 {
+		t.Errorf("expected no recorded parents for trait/anonymous/implements-only classes, got %v", engine.recordedParents)
+	}
+}
+
+func TestPHPVisitor_MethodDeclared_OnlyClassMethodsNotFreeFunctions(t *testing.T) {
+	code := `<?php
+namespace App\Service;
+
+class MyService
+{
+    public function doWork(): void {}
+    private function helper(): void {}
+}
+
+function freeFunction(): void {}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	methods := engine.declaredMethods["App\\Service\\MyService"]
+	if len(methods) != 2 {
+		t.Fatalf("expected 2 declared methods for MyService, got %v", methods)
+	}
+	found := map[string]bool{}
+	for _, m := range methods {
+		found[m] = true
+	}
+	if !found["doWork"] || !found["helper"] {
+		t.Errorf("expected doWork and helper declared, got %v", methods)
+	}
+
+	for class, methods := range engine.declaredMethods {
+		for _, m := range methods {
+			if m == "freeFunction" {
+				t.Errorf("free function must not be recorded as a declared method (class=%q)", class)
+			}
+		}
 	}
 }

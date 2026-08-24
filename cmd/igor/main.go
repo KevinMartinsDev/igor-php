@@ -51,6 +51,9 @@ func main() {
 	// 6. Run Audit
 	results := executeAudit(auditList, aud, cfg, baseline, rootPath)
 
+	// 6b. Rank findings by call-site reachability from application code
+	aud.MarkReachability(results)
+
 	// 7a. Handle Baseline Checking
 	if cfg.CheckBaseline {
 		staleEntries := config.IdentifyStaleEntries(baseline, results, rootPath)
