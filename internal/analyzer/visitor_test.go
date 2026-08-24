@@ -13,6 +13,11 @@ import (
 type mockEngine struct {
 	auditedClasses    []string
 	methodReturnTypes map[string]string
+	recordedCalls     []string
+}
+
+func (m *mockEngine) RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string) {
+	m.recordedCalls = append(m.recordedCalls, callerClass+"::"+callerMethod+" -> "+calleeClass+"::"+calleeMethod)
 }
 
 func (m *mockEngine) RecordClassAudited(name string) {

@@ -15,6 +15,9 @@ type Finding struct {
 	Line         int      `json:"line"`
 	ASTDetails   string   `json:"ast_details"`
 	Dependencies []string `json:"dependencies"`
+	ContextClass  string `json:"context_class,omitempty"`
+	ContextMethod string `json:"context_method,omitempty"`
+	Reachability  string `json:"reachability,omitempty"`
 }
 
 // Result groups findings by file.

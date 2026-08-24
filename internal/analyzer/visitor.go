@@ -16,6 +16,7 @@ type Engine interface {
 	IsResettable(className string) bool
 	GetMethodReturnType(className, methodName string) string
 	IsSharedService(className string) bool
+	RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string)
 }
 
 type mutationInfo struct {
@@ -511,6 +512,13 @@ func (v *PHPVisitor) resolveReceiverType(n *sitter.Node) string {
 	// Case 2: variable, e.g. $tracer
 	if kind == "variable" || kind == "variable_name" {
 		content := v.getContent(n)
+		if content == "$this" {
+			fullName := v.curClass
+			if v.namespace != "" {
+				fullName = v.namespace + "\\" + v.curClass
+			}
+			return fullName
+		}
 		if typeName, exists := v.localVarTypes[content]; exists {
 			return v.resolveFQCN(typeName)
 		}
@@ -592,6 +600,11 @@ func (v *PHPVisitor) logMutation(n *sitter.Node, prop string, static bool) {
 }
 
 func (v *PHPVisitor) performResetCheck() {
+	fullName := v.curClass
+	if v.namespace != "" {
+		fullName = v.namespace + "\\" + v.curClass
+	}
+
 	for prop, info := range v.mutated {
 		if v.workerSafeProps[prop] {
 			continue
@@ -605,14 +618,16 @@ func (v *PHPVisitor) performResetCheck() {
 		}
 		if !v.resetted[prop] {
 			v.findings = append(v.findings, symbol.Finding{
-				Message:      fmt.Sprintf("Property '%s' of %s is mutated but not reset in reset().", prop, v.curClass),
-				Severity:     "WARNING",
-				Line:         info.line,
-				Code:         info.code,
-				Snippet:      info.snippet,
-				ASTDetails:   info.astDetails,
-				Dependencies: v.dependencies,
-				Remediation:  fmt.Sprintf("Add '$this->%s = ...' in the reset() method.", prop),
+				Message:       fmt.Sprintf("Property '%s' of %s is mutated but not reset in reset().", prop, v.curClass),
+				Severity:      "WARNING",
+				Line:          info.line,
+				Code:          info.code,
+				Snippet:       info.snippet,
+				ASTDetails:    info.astDetails,
+				Dependencies:  v.dependencies,
+				Remediation:   fmt.Sprintf("Add '$this->%s = ...' in the reset() method.", prop),
+				ContextClass:  fullName,
+				ContextMethod: v.curMethod,
 			})
 		}
 	}
@@ -643,14 +658,16 @@ func (v *PHPVisitor) addFinding(n *sitter.Node, msg, hint, severity string) {
 	}
 
 	v.findings = append(v.findings, symbol.Finding{
-		Message:      msg,
-		Line:         row + 1,
-		Code:         v.lines[row],
-		Snippet:      v.getContent(n),
-		ASTDetails:   n.ToSexp(),
-		Dependencies: v.dependencies,
-		Remediation:  hint,
-		Severity:     severity,
+		Message:       msg,
+		Line:          row + 1,
+		Code:          v.lines[row],
+		Snippet:       v.getContent(n),
+		ASTDetails:    n.ToSexp(),
+		Dependencies:  v.dependencies,
+		Remediation:   hint,
+		Severity:      severity,
+		ContextClass:  fullName,
+		ContextMethod: v.curMethod,
 	})
 }
 
@@ -732,6 +749,12 @@ func (v *PHPVisitor) handleMethodCall(n *sitter.Node) {
 		return
 	}
 	methodName := v.getContent(nameNode)
+
+	if v.engine != nil {
+		if receiverClass := v.resolveReceiverType(obj); receiverClass != "" {
+			v.engine.RecordMethodCall(fullName, v.curMethod, receiverClass, methodName)
+		}
+	}
 
 	// 2. Check if the object/chain starts with a property of the current class ($this->propertyName)
 	propName, isProp := v.resolveRootProperty(obj)

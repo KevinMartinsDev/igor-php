@@ -22,6 +22,8 @@ type Auditor struct {
 	NonSharedServices    analyzer.NonSharedServiceMap
 	AuditedClasses       map[string]bool
 	methodSignatureCache map[string]map[string]string
+	callGraph            map[string]map[string]bool
+	projectClasses       map[string]bool
 	mu                   sync.Mutex
 }
 
@@ -31,6 +33,83 @@ func NewAuditor(cfg config.Config) *Auditor {
 		Config:               cfg,
 		AuditedClasses:       make(map[string]bool),
 		methodSignatureCache: make(map[string]map[string]string),
+		callGraph:            make(map[string]map[string]bool),
+		projectClasses:       make(map[string]bool),
+	}
+}
+
+type fileEngine struct {
+	*Auditor
+	isVendor bool
+}
+
+func (f *fileEngine) RecordClassAudited(name string) {
+	f.Auditor.RecordClassAudited(name)
+	if !f.isVendor {
+		f.Auditor.recordProjectClass(name)
+	}
+}
+
+func (a *Auditor) recordProjectClass(name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.projectClasses[normalizeClassName(name)] = true
+}
+
+func (a *Auditor) RecordMethodCall(callerClass, callerMethod, calleeClass, calleeMethod string) {
+	if callerMethod == "" || calleeMethod == "" {
+		return
+	}
+	callerKey := normalizeClassName(callerClass) + "::" + callerMethod
+	calleeKey := normalizeClassName(calleeClass) + "::" + calleeMethod
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.callGraph[callerKey] == nil {
+		a.callGraph[callerKey] = make(map[string]bool)
+	}
+	a.callGraph[callerKey][calleeKey] = true
+}
+
+func (a *Auditor) MarkReachability(results []symbol.AuditStatus) {
+	a.mu.Lock()
+	graph := a.callGraph
+	projectClasses := a.projectClasses
+	a.mu.Unlock()
+
+	reachableNodes := make(map[string]bool)
+	var queue []string
+	for callerKey := range graph {
+		callerClass, _, found := strings.Cut(callerKey, "::")
+		if found && projectClasses[callerClass] && !reachableNodes[callerKey] {
+			reachableNodes[callerKey] = true
+			queue = append(queue, callerKey)
+		}
+	}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		for callee := range graph[node] {
+			if !reachableNodes[callee] {
+				reachableNodes[callee] = true
+				queue = append(queue, callee)
+			}
+		}
+	}
+
+	for i := range results {
+		for j := range results[i].Findings {
+			finding := &results[i].Findings[j]
+			if finding.ContextClass == "" || finding.ContextMethod == "" {
+				continue
+			}
+			findingKey := normalizeClassName(finding.ContextClass) + "::" + finding.ContextMethod
+			if reachableNodes[findingKey] {
+				finding.Reachability = "HIGH"
+			} else {
+				finding.Reachability = "INFO"
+			}
+		}
 	}
 }
 
@@ -53,12 +132,25 @@ func (a *Auditor) Audit(path string, dependencies []string) ([]symbol.Finding, e
 	}
 	defer tree.Close()
 
-	v := analyzer.NewVisitor(content, a)
+	v := analyzer.NewVisitor(content, &fileEngine{Auditor: a, isVendor: isVendorPath(path)})
 	v.SetDependencies(dependencies)
 	v.SetNonSharedServices(a.NonSharedServices)
 	v.Walk(tree.RootNode())
 
 	return v.Findings(), nil
+}
+
+func isVendorPath(path string) bool {
+	p := filepath.ToSlash(path)
+	if strings.Contains(p, "/vendor/") || strings.HasPrefix(p, "vendor/") {
+		return true
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		if strings.Contains(filepath.ToSlash(abs), "/vendor/") {
+			return true
+		}
+	}
+	return false
 }
 
 // ExtractFQCN extracts the full class name from a file.
