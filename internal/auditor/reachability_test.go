@@ -93,6 +93,15 @@ func TestMarkReachability_InheritedMethodPromotedToHigh(t *testing.T) {
 		// declaration must NOT inherit that reachability.
 		{"Vendor\\Lib\\OverriddenBaseService::mutate", "INFO"},
 		{"Vendor\\Lib\\OverridingChildService::mutate", "HIGH"},
+		// Fixed-point regression: app code only calls the 3-level-deep
+		// GeneratorLeafService::getOutputFromHtml(), which promotes to ancestor
+		// method A (GeneratorBaseService::getOutputFromHtml). A's own
+		// `$this->createTemporaryFile()` call graph edge must then be followed
+		// from the newly promoted node, marking ancestor method B
+		// (GeneratorBaseService::createTemporaryFile()) reachable too — not just
+		// the directly promoted method.
+		{"Vendor\\Lib\\GeneratorBaseService::getOutputFromHtml", "HIGH"},
+		{"Vendor\\Lib\\GeneratorBaseService::createTemporaryFile", "HIGH"},
 	}
 	for _, tc := range cases {
 		if got := rankByClassMethod[tc.key]; got != tc.want {

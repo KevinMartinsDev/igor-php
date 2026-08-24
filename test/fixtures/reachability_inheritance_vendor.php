@@ -46,3 +46,35 @@ class OverridingChildService extends OverriddenBaseService
         $this->ownData[] = $value;
     }
 }
+
+class GeneratorBaseService
+{
+    private array $temporaryFiles = [];
+    private array $renderCache = [];
+
+    public function getOutputFromHtml(string $html): string
+    {
+        $this->renderCache[] = $html;
+        return $this->createTemporaryFile();
+    }
+
+    public function createTemporaryFile(): string
+    {
+        $this->temporaryFiles[] = 'tmp';
+        return 'tmp';
+    }
+}
+
+class GeneratorMiddleService extends GeneratorBaseService
+{
+    // Inherits getOutputFromHtml() and createTemporaryFile() without overriding either.
+}
+
+class GeneratorLeafService extends GeneratorMiddleService
+{
+    // Third inheritance level: still does not override anything. Only
+    // getOutputFromHtml() is called directly from app code; promoting it to
+    // GeneratorBaseService must also make the graph edge to
+    // createTemporaryFile() (reached only via `$this->` on the ancestor)
+    // reachable in turn.
+}

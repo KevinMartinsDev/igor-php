@@ -127,40 +127,44 @@ func (a *Auditor) MarkReachability(results []symbol.AuditStatus) {
 
 	reachableNodes := make(map[string]bool)
 	var queue []string
-	for callerKey := range graph {
-		callerClass, _, found := strings.Cut(callerKey, "::")
-		if found && projectClasses[callerClass] && !reachableNodes[callerKey] {
-			reachableNodes[callerKey] = true
-			queue = append(queue, callerKey)
-		}
-	}
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-		for callee := range graph[node] {
-			if !reachableNodes[callee] {
-				reachableNodes[callee] = true
-				queue = append(queue, callee)
-			}
+	enqueue := func(node string) {
+		if !reachableNodes[node] {
+			reachableNodes[node] = true
+			queue = append(queue, node)
 		}
 	}
 
-	// Conservative inherited-method promotion: a reachable call on a class that
-	// doesn't declare the called method itself (i.e. it inherits it, directly or
-	// through multiple `extends` levels) also marks the declaring ancestor's own
-	// method as reachable. A class that overrides the method stops the walk at
-	// itself, so an override never promotes its own reachability onto the parent.
-	reachableSnapshot := make([]string, 0, len(reachableNodes))
-	for node := range reachableNodes {
-		reachableSnapshot = append(reachableSnapshot, node)
+	for callerKey := range graph {
+		callerClass, _, found := strings.Cut(callerKey, "::")
+		if found && projectClasses[callerClass] {
+			enqueue(callerKey)
+		}
 	}
-	for _, node := range reachableSnapshot {
+
+	// Fixed-point worklist over both call-graph edges and inherited-method
+	// promotion. A reachable call on a class that doesn't declare the called
+	// method itself (i.e. it inherits it, directly or through multiple
+	// `extends` levels) also marks the declaring ancestor's own method as
+	// reachable. A class that overrides the method stops the walk at itself,
+	// so an override never promotes its own reachability onto the parent.
+	// Promoted ancestor nodes are enqueued just like any other newly reachable
+	// node, so their own outgoing call-graph edges (e.g. an inherited method
+	// calling a sibling method via `$this->`) are followed in turn. The loop
+	// only terminates once a pass adds nothing new, i.e. the queue drains.
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+
+		for callee := range graph[node] {
+			enqueue(callee)
+		}
+
 		class, method, found := strings.Cut(node, "::")
 		if !found {
 			continue
 		}
 		if ancestor := a.resolveDeclaringAncestor(class, method); ancestor != "" && ancestor != class {
-			reachableNodes[ancestor+"::"+method] = true
+			enqueue(ancestor + "::" + method)
 		}
 	}
 
