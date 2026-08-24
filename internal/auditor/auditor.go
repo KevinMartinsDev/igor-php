@@ -132,7 +132,10 @@ func (a *Auditor) Audit(path string, dependencies []string) ([]symbol.Finding, e
 	}
 	defer tree.Close()
 
-	v := analyzer.NewVisitor(content, &fileEngine{Auditor: a, isVendor: isVendorPath(path)})
+	v := analyzer.NewVisitor(content, &fileEngine{
+		Auditor:  a,
+		isVendor: isVendorPath(a.Config.NormalizePath(path)),
+	})
 	v.SetDependencies(dependencies)
 	v.SetNonSharedServices(a.NonSharedServices)
 	v.Walk(tree.RootNode())

@@ -1,6 +1,7 @@
 package auditor
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -46,5 +47,39 @@ func TestMarkReachability(t *testing.T) {
 	}
 	if rankByMethod["neverCalled"] != "INFO" {
 		t.Errorf("expected VendorService::neverCalled() to be INFO (no call site), got %q", rankByMethod["neverCalled"])
+	}
+}
+
+func TestAudit_SymlinkedVendorFileIsNotProjectClass(t *testing.T) {
+	realDir := t.TempDir()
+	phpFile := filepath.Join(realDir, "SymlinkedService.php")
+	content := []byte(`<?php
+namespace Vendor\Lib;
+
+class SymlinkedService
+{
+    private array $data = [];
+
+    public function mutate(string $value): void
+    {
+        $this->data[] = $value;
+    }
+}
+`)
+	if err := os.WriteFile(phpFile, content, 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	auditor := NewAuditor(config.Config{
+		SymlinkMap: map[string]string{
+			realDir: "vendor/acme/symlinked-package",
+		},
+	})
+	if _, err := auditor.Audit(phpFile, nil); err != nil {
+		t.Fatalf("audit failed: %v", err)
+	}
+
+	if auditor.projectClasses["Vendor\\Lib\\SymlinkedService"] {
+		t.Error("expected symlinked vendor class to be excluded from projectClasses")
 	}
 }
