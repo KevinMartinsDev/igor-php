@@ -1260,3 +1260,69 @@ function freeFunction(): void {}`
 		}
 	}
 }
+
+func TestPHPVisitor_DestructorDetection(t *testing.T) {
+	code := `<?php
+class SharedService {
+    public function __destruct() {
+        // Unsafe: shared service destructors are not invoked in persistent worker mode
+    }
+}
+
+class TransientService {
+    public function __destruct() {
+        // Safe: transient/non-shared service destructors are invoked when they go out of scope
+    }
+}
+
+#[WorkerSafe]
+class SafeService {
+    public function __destruct() {
+        // Safe: marked as WorkerSafe
+    }
+}
+
+class SafeMethodService {
+    #[WorkerSafe]
+    public function __destruct() {
+        // Safe: marked as WorkerSafe
+    }
+}
+`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	// Engine configuration where TransientService is explicitly non-shared
+	engine := &mockEngine{}
+	v := NewVisitor(content, engine)
+	
+	// Set TransientService as non-shared
+	nonShared := make(NonSharedServiceMap)
+	nonShared["TransientService"] = true
+	v.SetNonSharedServices(nonShared)
+
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+
+	// We expect exactly 1 finding: on SharedService::__destruct()
+	if len(findings) != 1 {
+		t.Fatalf("Expected exactly 1 finding, got %d: %v", len(findings), findings)
+	}
+
+	finding := findings[0]
+	if !strings.Contains(finding.Message, "__destruct()") {
+		t.Errorf("Expected message to mention __destruct(), got: %s", finding.Message)
+	}
+	if finding.Severity != "ERROR" {
+		t.Errorf("Expected severity to be ERROR, got: %s", finding.Severity)
+	}
+	if !strings.Contains(finding.Remediation, "Destructors") {
+		t.Errorf("Expected remediation to mention Destructors, got: %s", finding.Remediation)
+	}
+}

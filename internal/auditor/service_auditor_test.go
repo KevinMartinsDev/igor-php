@@ -90,6 +90,12 @@ func TestAuditFixtures(t *testing.T) {
 			expectedErrors: 1,
 			contains:       "Property 'localProp' of ConcreteChildAdapterWithLocalLeak is mutated but not reset",
 		},
+		{
+			name:           "Destructor detection magic method",
+			fixture:        "destructor_test.php",
+			expectedErrors: 1,
+			contains:       "Usage of __destruct() magic method is dangerous in Worker mode.",
+		},
 	}
 
 	for _, tt := range tests {

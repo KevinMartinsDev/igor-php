@@ -53,6 +53,7 @@ During its static analysis of shared/singleton services, Igor recursively scans 
 | **Local Static Variable** | `LocalStaticVariable` | Declaring local static variables inside methods, which persist across the PHP process lifecycle. | 🔴 Critical | `static $counter = 0;` |
 | **PHP Superglobals** | `SuperglobalsUsage` | Direct access to legacy superglobals instead of injecting or using the framework's Request object. | 🟡 Warning | `$_GET['id']` or `$_POST['name']` |
 | **Process Termination** | `ExecutionTerminator` | Standard PHP termination statements that crash the persistent worker. | 🔴 Critical | `exit()` or `die()` |
+| **Shared Service Lifecycle** | `MagicMethodDestruct` | Declaring `__destruct()` magic method on shared/singleton services. | 🔴 Critical | `public function __destruct() { ... }` |
 
 > 💡 **Philosophy & False Positives**:
 > Igor's primary mission is to shield you as much as possible from dangerous code patterns that can pollute state or leak memory in persistent worker environments.
