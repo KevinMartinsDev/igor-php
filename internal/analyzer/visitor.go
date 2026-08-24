@@ -875,16 +875,20 @@ func (v *PHPVisitor) detectSingletonMutation(n *sitter.Node, propName, methodNam
 
 	if hasType {
 		fqcn := v.resolveFQCN(typeName)
-		if v.engine != nil && v.engine.IsResettable(fqcn) {
-			if isDoctrineManager(fqcn) {
-				obj := n.ChildByFieldName("object")
-				if obj != nil && v.isDirectReference(obj) && isUnitOfWorkLifecycleMethod(methodName) {
-					isResettable = true
-				} else {
-					isResettable = false
-				}
-			} else {
+		if v.engine != nil {
+			if v.engine.IsSafeNamespace(fqcn) {
 				isResettable = true
+			} else if v.engine.IsResettable(fqcn) {
+				if isDoctrineManager(fqcn) {
+					obj := n.ChildByFieldName("object")
+					if obj != nil && v.isDirectReference(obj) && isUnitOfWorkLifecycleMethod(methodName) {
+						isResettable = true
+					} else {
+						isResettable = false
+					}
+				} else {
+					isResettable = true
+				}
 			}
 		}
 	}
@@ -994,29 +998,8 @@ func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 		kind := curr.Kind()
 		switch kind {
 		case "member_call_expression", "nullsafe_member_call_expression":
-			nameNode := curr.ChildByFieldName("name")
-			if nameNode != nil {
-				methodName := v.getContent(nameNode)
-				obj := curr.ChildByFieldName("object")
-
-				// Try semantic return-type tracking first
-				if obj != nil && v.engine != nil {
-					receiverClass := v.resolveReceiverType(obj)
-					if receiverClass != "" {
-						retType := v.engine.GetMethodReturnType(receiverClass, methodName)
-						if retType != "" {
-							// If the return type is NOT a shared service, it breaks the taint chain!
-							if !v.engine.IsSharedService(retType) {
-								return "", false
-							}
-						}
-					}
-				}
-
-				// Fallback to method-name based taint breakers
-				if isTaintBreakerMethod(methodName) {
-					return "", false
-				}
+			if v.isChainBrokenByMemberCall(curr) {
+				return "", false
 			}
 			curr = curr.ChildByFieldName("object")
 		case "member_access_expression", "nullsafe_member_access_expression":
@@ -1061,6 +1044,33 @@ func (v *PHPVisitor) resolveRootProperty(n *sitter.Node) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// isChainBrokenByMemberCall checks if a member call expression breaks the taint chain.
+func (v *PHPVisitor) isChainBrokenByMemberCall(curr *sitter.Node) bool {
+	nameNode := curr.ChildByFieldName("name")
+	if nameNode == nil {
+		return false
+	}
+	methodName := v.getContent(nameNode)
+	obj := curr.ChildByFieldName("object")
+
+	// Try semantic return-type tracking first
+	if obj != nil && v.engine != nil {
+		receiverClass := v.resolveReceiverType(obj)
+		if receiverClass != "" {
+			retType := v.engine.GetMethodReturnType(receiverClass, methodName)
+			if retType != "" {
+				// If the return type is NOT a shared service, it breaks the taint chain!
+				if !v.engine.IsSharedService(retType) {
+					return true
+				}
+			}
+		}
+	}
+
+	// Fallback to method-name based taint breakers
+	return isTaintBreakerMethod(methodName)
 }
 
 // isTaintBreakerMethod checks if the method is a factory, builder, or query-scoped method that breaks the taint chain

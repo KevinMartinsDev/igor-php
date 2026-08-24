@@ -505,6 +505,49 @@ func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
 	}
 }
 
+func TestAuditor_InheritedMethodReturnType(t *testing.T) {
+	a := NewAuditor(config.Config{})
+	filePath := filepath.Join("..", "..", "test", "fixtures", "doctrine_repository_test.php")
+
+	a.Symfony = &SymfonyBridge{
+		ClassToFile: map[string]string{
+			"App\\Repository\\ServiceEntityRepository": filePath,
+			"App\\Repository\\ProductRepository":       filePath,
+			"Doctrine\\ORM\\EntityManagerInterface":    filePath,
+		},
+		Container: &symbol.SymfonyContainer{
+			Definitions: map[string]symbol.SymfonyService{
+				"doctrine": {
+					Class:      "Doctrine\\Bundle\\DoctrineBundle\\Registry",
+					Resettable: true,
+				},
+				"Doctrine\\ORM\\EntityManagerInterface": {
+					Class:  "Doctrine\\ORM\\EntityManagerInterface",
+					Shared: true,
+				},
+				"App\\Repository\\ProductRepository": {
+					Class:  "App\\Repository\\ProductRepository",
+					Shared: true,
+				},
+			},
+		},
+	}
+
+	findings, err := a.Audit(filePath, nil)
+	if err != nil {
+		t.Fatalf("Audit failed: %v", err)
+	}
+
+	// We expect exactly 1 finding: on setUnsafeProperty in testUnsafeMutation()
+	if len(findings) != 1 {
+		t.Fatalf("Expected exactly 1 finding on doctrine_repository_test.php, got %d: %v", len(findings), findings)
+	}
+
+	if !strings.Contains(findings[0].Snippet, "setUnsafeProperty") {
+		t.Errorf("Expected finding snippet to be on setUnsafeProperty, got: %s", findings[0].Snippet)
+	}
+}
+
 func TestAuditor_UnitEdgeCases(t *testing.T) {
 	// Test IsSharedService edge cases
 	{

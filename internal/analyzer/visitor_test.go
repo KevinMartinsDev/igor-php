@@ -1366,7 +1366,7 @@ class SafeMethodService {
 	// Engine configuration where TransientService is explicitly non-shared
 	engine := &mockEngine{}
 	v := NewVisitor(content, engine)
-	
+
 	// Set TransientService as non-shared
 	nonShared := make(NonSharedServiceMap)
 	nonShared["TransientService"] = true
@@ -1390,5 +1390,38 @@ class SafeMethodService {
 	}
 	if !strings.Contains(finding.Remediation, "Destructors") {
 		t.Errorf("Expected remediation to mention Destructors, got: %s", finding.Remediation)
+	}
+}
+
+func TestPHPVisitor_DependencyInSafeNamespace_BypassesMutation(t *testing.T) {
+	code := `<?php
+class ServiceWithSafeDependency {
+    private \Symfony\Component\HttpClient\CachingHttpClient $client;
+
+    public function __construct(\Symfony\Component\HttpClient\CachingHttpClient $client) {
+        $this->client = $client;
+    }
+
+    public function testMutate() {
+        $this->client->setSomeOption('val'); // Safe because CachingHttpClient is in a safe namespace
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockSafeNamespaceEngine{
+		safeNamespace: "Symfony\\Component\\HttpClient\\CachingHttpClient",
+	}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	if len(findings) > 0 {
+		t.Errorf("Expected 0 findings when dependency is in a safe namespace, got %d: %v", len(findings), findings)
 	}
 }

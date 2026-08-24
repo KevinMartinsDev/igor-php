@@ -26,6 +26,7 @@ type Auditor struct {
 	projectClasses       map[string]bool
 	classParents         map[string]string
 	declaredMethods      map[string]map[string]bool
+	parentClassCache     map[string]string
 	mu                   sync.Mutex
 }
 
@@ -39,6 +40,7 @@ func NewAuditor(cfg config.Config) *Auditor {
 		projectClasses:       make(map[string]bool),
 		classParents:         make(map[string]string),
 		declaredMethods:      make(map[string]map[string]bool),
+		parentClassCache:     make(map[string]string),
 	}
 }
 
@@ -434,18 +436,33 @@ func (a *Auditor) IsDevPackagePath(path string) bool {
 	return false
 }
 
-// GetMethodReturnType returns the declared return type of a method on a class.
-// It parses the file where the class is defined and caches the method signatures.
+// GetMethodReturnType returns the declared return type of a method on a class (including inherited methods from parent classes).
 func (a *Auditor) GetMethodReturnType(className, methodName string) string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	return a.getMethodReturnTypeWithDepth(className, methodName, make(map[string]bool))
+}
 
+func (a *Auditor) getMethodReturnTypeWithDepth(className, methodName string, visited map[string]bool) string {
 	normClass := normalizeClassName(className)
+	if visited[normClass] {
+		return ""
+	}
+	visited[normClass] = true
 
+	a.mu.Lock()
 	// Check if present in cache
 	if classCache, exists := a.methodSignatureCache[normClass]; exists {
-		return classCache[methodName]
+		if retType, found := classCache[methodName]; found && retType != "" {
+			a.mu.Unlock()
+			return retType
+		}
+		if parentClass, hasParent := a.parentClassCache[normClass]; hasParent && parentClass != "" {
+			a.mu.Unlock()
+			return a.getMethodReturnTypeWithDepth(parentClass, methodName, visited)
+		}
+		a.mu.Unlock()
+		return ""
 	}
+	a.mu.Unlock()
 
 	// Not in cache, try to locate file
 	if a.Symfony == nil || a.Symfony.ClassToFile == nil {
@@ -469,15 +486,31 @@ func (a *Auditor) GetMethodReturnType(className, methodName string) string {
 	}
 
 	// Parse class methods
-	signatures, err := a.parseClassMethodSignatures(className, filePath)
+	signatures, parentClass, err := a.parseClassMethodSignatures(className, filePath)
+
+	a.mu.Lock()
 	if err != nil {
 		// Cache empty map to avoid re-parsing on error
 		a.methodSignatureCache[normClass] = make(map[string]string)
+		a.mu.Unlock()
 		return ""
 	}
 
 	a.methodSignatureCache[normClass] = signatures
-	return signatures[methodName]
+	if parentClass != "" {
+		a.parentClassCache[normClass] = parentClass
+	}
+	a.mu.Unlock()
+
+	if retType, found := signatures[methodName]; found && retType != "" {
+		return retType
+	}
+
+	if parentClass != "" {
+		return a.getMethodReturnTypeWithDepth(parentClass, methodName, visited)
+	}
+
+	return ""
 }
 
 func isBuiltinType(t string) bool {
@@ -512,10 +545,10 @@ func parseMethodDeclaration(node *sitter.Node, content []byte, namespace, classN
 	return mName, retType
 }
 
-func (a *Auditor) parseClassMethodSignatures(className, filePath string) (map[string]string, error) {
+func (a *Auditor) parseClassMethodSignatures(className, filePath string) (map[string]string, string, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	p := sitter.NewParser()
@@ -524,12 +557,13 @@ func (a *Auditor) parseClassMethodSignatures(className, filePath string) (map[st
 
 	tree := p.Parse(content, nil)
 	if tree == nil {
-		return nil, fmt.Errorf("failed to parse %s", filePath)
+		return nil, "", fmt.Errorf("failed to parse %s", filePath)
 	}
 	defer tree.Close()
 
 	signatures := make(map[string]string)
 	var namespace string
+	var parentClass string
 
 	var walk func(*sitter.Node)
 	walk = func(n *sitter.Node) {
@@ -555,6 +589,8 @@ func (a *Auditor) parseClassMethodSignatures(className, filePath string) (map[st
 			}
 
 			if normalizeClassName(fqcn) == normalizeClassName(className) {
+				parentClass = resolveParentClassFromNode(n, content, namespace)
+
 				// Walk children to find method_declarations
 				var walkClassBody func(*sitter.Node)
 				walkClassBody = func(bodyNode *sitter.Node) {
@@ -580,5 +616,65 @@ func (a *Auditor) parseClassMethodSignatures(className, filePath string) (map[st
 	}
 	walk(tree.RootNode())
 
-	return signatures, nil
+	return signatures, parentClass, nil
+}
+
+// resolveParentClassFromNode extracts and resolves the parent class name from a class declaration node.
+func resolveParentClassFromNode(n *sitter.Node, content []byte, namespace string) string {
+	var parentClass string
+	for i := uint(0); i < n.ChildCount(); i++ {
+		child := n.Child(i)
+		if child.Kind() == "base_clause" {
+			for j := uint(0); j < child.ChildCount(); j++ {
+				grandChild := child.Child(j)
+				if grandChild.Kind() == "name" {
+					parentClass = string(content[grandChild.StartByte():grandChild.EndByte()])
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if parentClass != "" {
+		lines := strings.Split(string(content), "\n")
+		return resolveFQCNInFile(parentClass, lines, namespace)
+	}
+	return ""
+}
+
+// resolveFQCNInFile resolves class names against the namespace and "use" imports inside a file's lines.
+func resolveFQCNInFile(typeName string, lines []string, namespace string) string {
+	if strings.HasPrefix(typeName, "\\") {
+		return strings.TrimPrefix(typeName, "\\")
+	}
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "use ") && strings.HasSuffix(line, ";") {
+			importPart := strings.TrimSuffix(strings.TrimPrefix(line, "use "), ";")
+			importPart = strings.TrimSpace(importPart)
+			if strings.Contains(importPart, " as ") {
+				parts := strings.Split(importPart, " as ")
+				if len(parts) == 2 {
+					fqcn := strings.TrimSpace(parts[0])
+					alias := strings.TrimSpace(parts[1])
+					if alias == typeName {
+						return fqcn
+					}
+				}
+			} else {
+				parts := strings.Split(importPart, "\\")
+				lastPart := parts[len(parts)-1]
+				if lastPart == typeName {
+					return importPart
+				}
+			}
+		}
+	}
+
+	if namespace != "" {
+		return namespace + "\\" + typeName
+	}
+	return typeName
 }
