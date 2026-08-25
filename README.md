@@ -250,7 +250,10 @@ Export your container's graph to a framework-agnostic JSON file and pass it with
     { "class": "App\\Http\\Uri", "shared": false },
     { "class": "App\\Cache\\CacheItem", "shared": false },
     { "class": "App\\Service\\MailService", "shared": true }
-  ]
+  ],
+  "aliases": {
+    "App\\Contract\\MailerInterface": "App\\Service\\MailService"
+  }
 }
 ```
 
@@ -258,7 +261,7 @@ Export your container's graph to a framework-agnostic JSON file and pass it with
 igor-php --no-agent --container-dump igor-container.json .
 ```
 
-By convention, keep `igor-container.json` at the project root, side-by-side with `igor.json`. Any class listed with `"shared": false` is treated as transient and its state mutations are **skipped** — exactly as the Symfony bridge already skips non-shared (prototype) services. Classes marked `"shared": true`, or absent from the file, continue to be audited normally. You can also set the path in `igor.json` via `"container_dump": "igor-container.json"`.
+By convention, keep `igor-container.json` at the project root, side-by-side with `igor.json`. Any class listed with `"shared": false` is treated as transient and its state mutations are **skipped** — exactly as the Symfony bridge already skips non-shared (prototype) services. Classes marked `"shared": true`, or absent from the file, continue to be audited normally. The optional `"aliases"` map tells Igor which interface FQCN resolves to which concrete class, so reachability ranking can follow calls made through an interface type-hint. You can also set the path in `igor.json` via `"container_dump": "igor-container.json"`.
 
 > 💡 The format is intentionally minimal so **any** framework can produce it (Laravel, Laminas, …). Symfony's `igor_service_map.json` is simply one richer producer of the same idea.
 >
@@ -366,7 +369,7 @@ Not every flagged mutator matters equally: a setter on a vendor class might neve
   275 | $this->binary = $binary;
 ```
 
-> 💡 **Known limitation**: reachability matching works on exact `Class::Method` pairs. Igor conservatively follows direct and multi-level `extends` chains — a subclass that inherits, but doesn't override, a flagged parent method is linked through to the parent's finding, and an override correctly stops that promotion at the overriding class. It does **not** follow interfaces, traits, or magic methods (`__call`, `__get`, etc.), so a call resolved only through one of those still won't be linked through. Treat `[INFO]` as "no call site found *with this analysis*", not an absolute guarantee of dead code.
+> 💡 **Known limitation**: reachability matching works on exact `Class::Method` pairs. Igor conservatively follows direct and multi-level `extends` chains — a subclass that inherits, but doesn't override, a flagged parent method is linked through to the parent's finding, and an override correctly stops that promotion at the overriding class. It also follows interface aliases from the Symfony agent map or `--container-dump`, so a call through an interface type-hint is linked to the concrete implementation. It does **not** follow traits or magic methods (`__call`, `__get`, etc.), so a call resolved only through one of those still won't be linked through. Treat `[INFO]` as "no call site found *with this analysis*", not an absolute guarantee of dead code.
 
 ---
 
@@ -395,7 +398,7 @@ You can customize Igor's behavior by creating an `igor.json` file at the root of
 - **ignore_vendors**: Set to `true` to skip auditing all services located within the `vendor/` directory. Defaults to `false`.
 - **baseline**: Path to a baseline file containing findings to ignore.
 - **ignore_external_baseline**: Set to `true` to skip discovering and merging baseline files from external vendor packages. Defaults to `false`.
-- **container_dump**: Path to a generic container dump JSON (`{ "services": [ { "class": ..., "shared": bool } ] }`) listing non-shared/transient classes to skip. Equivalent to the `--container-dump` flag.
+- **container_dump**: Path to a generic container dump JSON (`{ "services": [ { "class": ..., "shared": bool } ], "aliases": { "Interface": "ConcreteClass" } }`) listing non-shared/transient classes to skip and optional interface-to-implementation aliases for reachability. Equivalent to the `--container-dump` flag.
 - **console_path**: Custom path to the Symfony console binary. Defaults to `bin/console`.
 - **env**: Symfony environment to use for container analysis. Defaults to `dev`.
 - **verbose**: Enable verbose output to see skipped services and reasons. Defaults to `false`.

@@ -52,16 +52,16 @@ func TestCalculateAuditStatus(t *testing.T) {
 func TestLoadContainerDump(t *testing.T) {
 	// Case 1: Empty dump path
 	cfgEmpty := config.Config{ContainerDump: ""}
-	nonSharedEmpty := loadContainerDump("/root", cfgEmpty)
-	if nonSharedEmpty != nil {
-		t.Error("Expected nil container dump map for empty configuration")
+	nonSharedEmpty, aliasesEmpty := loadContainerDump("/root", cfgEmpty)
+	if nonSharedEmpty != nil || aliasesEmpty != nil {
+		t.Error("Expected nil container dump maps for empty configuration")
 	}
 
 	// Case 2: Non-existent dump path
 	cfgMissing := config.Config{ContainerDump: "missing-dump.json"}
-	nonSharedMissing := loadContainerDump("/root", cfgMissing)
-	if nonSharedMissing != nil {
-		t.Error("Expected nil container dump map for missing dump path")
+	nonSharedMissing, aliasesMissing := loadContainerDump("/root", cfgMissing)
+	if nonSharedMissing != nil || aliasesMissing != nil {
+		t.Error("Expected nil container dump maps for missing dump path")
 	}
 
 	// Case 3: Valid JSON container dump
@@ -71,19 +71,25 @@ func TestLoadContainerDump(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	dumpData := `{"services": [{"class": "App\\Service\\Transient", "shared": false}]}`
+	dumpData := `{"services": [{"class": "App\\Service\\Transient", "shared": false}], "aliases": {"App\\Contract\\CalculatorInterface": "App\\Service\\Calculator"}}`
 	dumpPath := filepath.Join(tempDir, "container-dump.json")
 	if err := os.WriteFile(dumpPath, []byte(dumpData), 0644); err != nil {
 		t.Fatalf("Failed to write dump file: %v", err)
 	}
 
 	cfgValid := config.Config{ContainerDump: dumpPath}
-	nonSharedValid := loadContainerDump(tempDir, cfgValid)
+	nonSharedValid, aliasesValid := loadContainerDump(tempDir, cfgValid)
 	if nonSharedValid == nil {
 		t.Fatal("Expected populated container dump map, got nil")
 	}
 	if !nonSharedValid["App\\Service\\Transient"] {
 		t.Error("Expected App\\Service\\Transient to be registered as non-shared")
+	}
+	if aliasesValid == nil {
+		t.Fatal("Expected populated aliases map, got nil")
+	}
+	if aliasesValid["App\\Contract\\CalculatorInterface"] != "App\\Service\\Calculator" {
+		t.Errorf("Expected interface alias to resolve to App\\Service\\Calculator, got %q", aliasesValid["App\\Contract\\CalculatorInterface"])
 	}
 }
 

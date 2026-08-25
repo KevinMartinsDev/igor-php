@@ -40,9 +40,9 @@ func calculateAuditStatus(findings []symbol.Finding) string {
 	return "⚠️  WARN"
 }
 
-func loadContainerDump(rootPath string, cfg config.Config) analyzer.NonSharedServiceMap {
+func loadContainerDump(rootPath string, cfg config.Config) (analyzer.NonSharedServiceMap, analyzer.AliasesMap) {
 	if cfg.ContainerDump == "" {
-		return nil
+		return nil, nil
 	}
 
 	dumpPath := cfg.ContainerDump
@@ -50,14 +50,17 @@ func loadContainerDump(rootPath string, cfg config.Config) analyzer.NonSharedSer
 		dumpPath = filepath.Join(rootPath, dumpPath)
 	}
 
-	nonShared, err := analyzer.LoadContainerDump(dumpPath)
+	nonShared, aliases, err := analyzer.LoadContainerDump(dumpPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠️  Warning: Could not load container dump from %s: %v\n", dumpPath, err)
-		return nil
+		return nil, nil
 	}
 
 	fmt.Fprintf(os.Stderr, "📦 Container dump loaded: %d non-shared (transient) classes will be skipped.\n", len(nonShared))
-	return nonShared
+	if len(aliases) > 0 {
+		fmt.Fprintf(os.Stderr, "   %d interface aliases will be used for reachability.\n", len(aliases))
+	}
+	return nonShared, aliases
 }
 
 func runParallelAudit(auditList []symbol.AuditStatus, aud *auditor.Auditor) <-chan symbol.AuditStatus {

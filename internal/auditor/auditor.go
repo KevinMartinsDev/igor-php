@@ -20,6 +20,7 @@ type Auditor struct {
 	Config               config.Config
 	Symfony              *SymfonyBridge
 	NonSharedServices    analyzer.NonSharedServiceMap
+	InterfaceAliases     analyzer.AliasesMap
 	AuditedClasses       map[string]bool
 	methodSignatureCache map[string]map[string]string
 	callGraph            map[string]map[string]bool
@@ -40,6 +41,75 @@ func NewAuditor(cfg config.Config) *Auditor {
 		classParents:         make(map[string]string),
 		declaredMethods:      make(map[string]map[string]bool),
 	}
+}
+
+// LoadInterfaceAliases normalizes raw interface-to-target mappings and stores
+// them as interface FQCN -> concrete class FQCN. When a Symfony container is
+// available, service IDs and alias chains are resolved to their concrete class.
+func (a *Auditor) LoadInterfaceAliases(raw analyzer.AliasesMap) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.InterfaceAliases == nil {
+		a.InterfaceAliases = make(analyzer.AliasesMap)
+	}
+
+	for iface, target := range raw {
+		iface = normalizeClassName(iface)
+		target = normalizeClassName(target)
+		if iface == "" || target == "" {
+			continue
+		}
+		a.InterfaceAliases[iface] = a.resolveAliasToConcrete(target)
+	}
+}
+
+// LoadSymfonyAliases converts the Symfony container alias map into the unified
+// interface alias map used by reachability ranking.
+func (a *Auditor) LoadSymfonyAliases() {
+	if a.Symfony == nil || a.Symfony.Container == nil {
+		return
+	}
+
+	raw := make(analyzer.AliasesMap)
+	for aliasKey, val := range a.Symfony.Container.Aliases {
+		if target := resolveAliasTarget(val); target != "" {
+			raw[aliasKey] = target
+		}
+	}
+	a.LoadInterfaceAliases(raw)
+}
+
+// resolveInterfaceClass returns the concrete class for an interface FQCN when
+// an alias is known. It returns an empty string when no mapping exists.
+func (a *Auditor) resolveInterfaceClass(className string) string {
+	if concrete, ok := a.InterfaceAliases[normalizeClassName(className)]; ok {
+		return concrete
+	}
+	return ""
+}
+
+// resolveAliasToConcrete follows Symfony aliases and definitions until it
+// reaches a concrete class. For non-Symfony projects it returns the target as-is.
+func (a *Auditor) resolveAliasToConcrete(target string) string {
+	if a.Symfony == nil || a.Symfony.Container == nil {
+		return target
+	}
+
+	possibleIDs := a.resolveAliases(target)
+	for _, id := range possibleIDs {
+		for defID, def := range a.Symfony.Container.Definitions {
+			normDefID := normalizeClassName(defID)
+			normDefClass := normalizeClassName(def.Class)
+			if id == normDefID || id == normDefClass {
+				if def.Class != "" {
+					return normDefClass
+				}
+				return normDefID
+			}
+		}
+	}
+	return target
 }
 
 type fileEngine struct {
@@ -152,6 +222,9 @@ func (a *Auditor) MarkReachability(results []symbol.AuditStatus) {
 		class, method, found := strings.Cut(node, "::")
 		if !found {
 			continue
+		}
+		if concrete := a.resolveInterfaceClass(class); concrete != "" && concrete != class {
+			enqueue(concrete + "::" + method)
 		}
 		if ancestor := a.resolveDeclaringAncestor(class, method); ancestor != "" && ancestor != class {
 			enqueue(ancestor + "::" + method)

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/igor-php/igor-php/internal/analyzer"
 	"github.com/igor-php/igor-php/internal/config"
 	"github.com/igor-php/igor-php/pkg/symbol"
 )
@@ -100,6 +101,65 @@ func TestMarkReachability_InheritedMethodPromotedToHigh(t *testing.T) {
 		if got := rankByClassMethod[tc.key]; got != tc.want {
 			t.Errorf("expected %s to be %s, got %q (all: %v)", tc.key, tc.want, got, rankByClassMethod)
 		}
+	}
+}
+
+func TestMarkReachability_InterfaceCallPromotedToHigh(t *testing.T) {
+	appPath := filepath.Join("..", "..", "test", "fixtures", "reachability_interface_app.php")
+	vendorPath := filepath.Join("..", "..", "test", "fixtures", "reachability_interface_vendor.php")
+
+	cases := []struct {
+		name    string
+		aliases analyzer.AliasesMap
+		want    map[string]string
+	}{
+		{
+			name:    "without interface aliases concrete method is unreachable",
+			aliases: nil,
+			want:    map[string]string{"add": "INFO", "neverCalled": "INFO"},
+		},
+		{
+			name: "with interface aliases call resolves to concrete class",
+			aliases: analyzer.AliasesMap{
+				"Vendor\\Lib\\CalculatorInterface": "Vendor\\Lib\\Calculator",
+			},
+			want: map[string]string{"add": "HIGH", "neverCalled": "INFO"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			auditor := NewAuditor(config.Config{})
+
+			appFindings, err := auditor.Audit(appPath, nil)
+			if err != nil {
+				t.Fatalf("failed to audit app fixture: %v", err)
+			}
+			vendorFindings, err := auditor.Audit(vendorPath, nil)
+			if err != nil {
+				t.Fatalf("failed to audit vendor fixture: %v", err)
+			}
+
+			auditor.recordProjectClass("App\\Controller\\InterfaceController")
+			auditor.LoadInterfaceAliases(tc.aliases)
+
+			results := []symbol.AuditStatus{
+				{FilePath: appPath, Findings: appFindings},
+				{FilePath: vendorPath, Findings: vendorFindings},
+			}
+			auditor.MarkReachability(results)
+
+			rankByMethod := make(map[string]string)
+			for _, f := range results[1].Findings {
+				rankByMethod[f.ContextMethod] = f.Reachability
+			}
+
+			for method, wantRank := range tc.want {
+				if got := rankByMethod[method]; got != wantRank {
+					t.Errorf("expected Calculator::%s() to be %s, got %q", method, wantRank, got)
+				}
+			}
+		})
 	}
 }
 
