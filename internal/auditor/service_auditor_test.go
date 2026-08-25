@@ -313,6 +313,43 @@ func TestAuditor_IsResettable_DoctrineManager(t *testing.T) {
 	}
 }
 
+func TestAuditor_ResolveAliasToConcrete(t *testing.T) {
+	a := NewAuditor(config.Config{})
+	a.Symfony = &SymfonyBridge{
+		Container: &symbol.SymfonyContainer{
+			Definitions: map[string]symbol.SymfonyService{
+				"app.factory": {
+					Class:  "App\\Service\\Factory",
+					Shared: true,
+				},
+				"App\\Service\\Direct": {
+					Class:  "App\\Service\\Direct",
+					Shared: true,
+				},
+			},
+		},
+	}
+
+	t.Run("resolves service id alias to concrete class", func(t *testing.T) {
+		if got := a.resolveAliasToConcrete("app.factory"); got != "App\\Service\\Factory" {
+			t.Errorf("Expected app.factory -> App\\Service\\Factory, got %q", got)
+		}
+	})
+
+	t.Run("returns class fqcn when target is already a class", func(t *testing.T) {
+		if got := a.resolveAliasToConcrete("App\\Service\\Direct"); got != "App\\Service\\Direct" {
+			t.Errorf("Expected direct class to stay unchanged, got %q", got)
+		}
+	})
+
+	t.Run("returns target as-is when no symfony container is loaded", func(t *testing.T) {
+		a2 := NewAuditor(config.Config{})
+		if got := a2.resolveAliasToConcrete("App\\Service\\NoContainer"); got != "App\\Service\\NoContainer" {
+			t.Errorf("Expected target unchanged without container, got %q", got)
+		}
+	})
+}
+
 func TestAuditor_GetMethodReturnType(t *testing.T) {
 	// Create temporary directory for our test file
 	tmpDir, err := os.MkdirTemp("", "igor_auditor_test")

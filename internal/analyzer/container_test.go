@@ -28,7 +28,7 @@ func TestLoadContainerDumpValidatesSuccessfully(t *testing.T) {
 	}
 	_ = tempFile.Close()
 
-	nonShared, err := LoadContainerDump(tempFile.Name())
+	nonShared, aliases, err := LoadContainerDump(tempFile.Name())
 	if err != nil {
 		t.Fatalf("Unexpected parsing error: %v", err)
 	}
@@ -40,27 +40,82 @@ func TestLoadContainerDumpValidatesSuccessfully(t *testing.T) {
 	if nonShared["App\\Security\\Security"] {
 		t.Error("Security is a shared service and should not exist in the non-shared lookup map")
 	}
+
+	if len(aliases) != 0 {
+		t.Errorf("Expected no aliases, got %d", len(aliases))
+	}
 }
 
 // TestLoadContainerDumpEmptyPath guarantees callers can invoke the loader
 // unconditionally: an empty path yields an empty, non-nil map and no error.
 func TestLoadContainerDumpEmptyPath(t *testing.T) {
-	nonShared, err := LoadContainerDump("")
+	nonShared, aliases, err := LoadContainerDump("")
 	if err != nil {
 		t.Fatalf("Unexpected error for empty path: %v", err)
 	}
 	if nonShared == nil {
 		t.Fatal("Expected a non-nil map for empty path")
 	}
+	if aliases == nil {
+		t.Fatal("Expected a non-nil aliases map for empty path")
+	}
 	if len(nonShared) != 0 {
 		t.Errorf("Expected an empty map for empty path, got %d entries", len(nonShared))
+	}
+	if len(aliases) != 0 {
+		t.Errorf("Expected an empty aliases map for empty path, got %d entries", len(aliases))
+	}
+}
+
+// TestLoadContainerDumpParsesAliases ensures interface-to-implementation
+// aliases are loaded and normalized from the JSON dump.
+func TestLoadContainerDumpParsesAliases(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "container_aliases_*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temporary file: %v", err)
+	}
+	defer func() { _ = os.Remove(tempFile.Name()) }()
+
+    content := `{
+        "services": [
+            {"class": "App\\Service\\MailService", "shared": true},
+            {"class": "App\\Service\\Logger", "shared": true}
+        ],
+        "aliases": {
+            "App\\Contract\\MailerInterface": "App\\Service\\MailService",
+            "\\App\\Contract\\LoggerInterface": "App\\Service\\Logger",
+            "App\\Contract\\FactoryInterface": "app.factory"
+        }
+    }`
+
+	if _, err := tempFile.Write([]byte(content)); err != nil {
+		t.Fatalf("Failed to write mock JSON content: %v", err)
+	}
+	_ = tempFile.Close()
+
+	_, aliases, err := LoadContainerDump(tempFile.Name())
+	if err != nil {
+		t.Fatalf("Unexpected parsing error: %v", err)
+	}
+
+	if len(aliases) != 3 {
+		t.Fatalf("Expected 3 aliases, got %d", len(aliases))
+	}
+	if aliases["App\\Contract\\MailerInterface"] != "App\\Service\\MailService" {
+		t.Errorf("Expected MailerInterface -> MailService, got %q", aliases["App\\Contract\\MailerInterface"])
+	}
+	if aliases["App\\Contract\\LoggerInterface"] != "App\\Service\\Logger" {
+		t.Errorf("Expected LoggerInterface -> Logger, got %q", aliases["App\\Contract\\LoggerInterface"])
+	}
+	if aliases["App\\Contract\\FactoryInterface"] != "app.factory" {
+		t.Errorf("Expected FactoryInterface -> app.factory, got %q", aliases["App\\Contract\\FactoryInterface"])
 	}
 }
 
 // TestLoadContainerDumpMissingFile ensures a missing file surfaces as an error
 // rather than silently succeeding.
 func TestLoadContainerDumpMissingFile(t *testing.T) {
-	_, err := LoadContainerDump(filepath.Join(t.TempDir(), "does-not-exist.json"))
+	_, _, err := LoadContainerDump(filepath.Join(t.TempDir(), "does-not-exist.json"))
 	if err == nil {
 		t.Fatal("Expected an error for a missing container dump file, got nil")
 	}
@@ -81,13 +136,16 @@ func TestLoadContainerDumpNormalizesLeadingBackslash(t *testing.T) {
 	}
 	_ = tempFile.Close()
 
-	nonShared, err := LoadContainerDump(tempFile.Name())
+	nonShared, aliases, err := LoadContainerDump(tempFile.Name())
 	if err != nil {
 		t.Fatalf("Unexpected parsing error: %v", err)
 	}
 
 	if !nonShared["App\\Http\\Stream"] {
 		t.Error("Stream should be matched after trimming the leading backslash")
+	}
+	if len(aliases) != 0 {
+		t.Errorf("Expected no aliases, got %d", len(aliases))
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/igor-php/igor-php/internal/analyzer"
 	"github.com/igor-php/igor-php/internal/auditor"
 	"github.com/igor-php/igor-php/internal/config"
 )
@@ -27,7 +28,8 @@ func main() {
 	rep := setupReporter(cfg)
 
 	// 1b. Load generic container dump (non-shared/transient classes to skip)
-	aud.NonSharedServices = loadContainerDump(rootPath, cfg)
+	var containerAliases analyzer.AliasesMap
+	aud.NonSharedServices, containerAliases = loadContainerDump(rootPath, cfg)
 
 	// 2. Detect Symfony project
 	symfony, err := detectSymfonyProject(rootPath, cfg)
@@ -36,6 +38,12 @@ func main() {
 		os.Exit(1)
 	}
 	aud.Symfony = symfony
+	if aud.Symfony != nil {
+		aud.LoadSymfonyAliases()
+	}
+	if len(containerAliases) > 0 {
+		aud.LoadInterfaceAliases(containerAliases)
+	}
 
 	// 3. Load Baseline
 	baseline := loadAuditBaseline(rootPath, &cfg)
