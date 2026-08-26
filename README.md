@@ -10,6 +10,9 @@
   <a href="https://codecov.io/gh/igor-php/igor-php">
     <img src="https://codecov.io/gh/igor-php/igor-php/graph/badge.svg" alt="codecov" />
   </a>
+  <a href="https://packagist.org/packages/igor-php/igor-php">
+    <img src="https://img.shields.io/packagist/dt/igor-php/igor-php.svg?style=flat-square&colorB=green" alt="Total Downloads" />
+  </a>
 </p>
 
 **The faithful assistant for your FrankenPHP Workers.**
