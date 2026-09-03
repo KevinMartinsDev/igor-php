@@ -153,11 +153,11 @@ func TestAuditor_IsResettable_And_IsExplicitlyNonShared(t *testing.T) {
 		Aliases: map[string]interface{}{
 			"App\\Translator\\TranslatorInterface": ".abstract.instanceof.App\\Translator\\MyTranslator",
 			"App\\Service\\NonSharedInterface":     "App\\Service\\NonSharedService",
-			"App\\Service\\MapServiceAlias":       map[string]interface{}{"service": "App\\Service\\NonSharedService"},
-			"App\\Service\\MapIdAlias":            map[string]interface{}{"id": "App\\Service\\NonSharedService"},
-			"App\\Service\\MapTargetAlias":        map[string]interface{}{"target": "App\\Service\\NonSharedService"},
-			"App\\Service\\MapInvalidAlias":       map[string]interface{}{"invalid": "App\\Service\\NonSharedService"},
-			"App\\Service\\InvalidTypeAlias":      123,
+			"App\\Service\\MapServiceAlias":        map[string]interface{}{"service": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapIdAlias":             map[string]interface{}{"id": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapTargetAlias":         map[string]interface{}{"target": "App\\Service\\NonSharedService"},
+			"App\\Service\\MapInvalidAlias":        map[string]interface{}{"invalid": "App\\Service\\NonSharedService"},
+			"App\\Service\\InvalidTypeAlias":       123,
 		},
 	}
 
@@ -490,12 +490,12 @@ func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
 
 	a.Symfony = &SymfonyBridge{
 		ClassToFile: map[string]string{
-			"App\\Service\\TraceTest\\TracerInterface": filePath,
-			"App\\Service\\TraceTest\\Span":            filePath,
+			"App\\Service\\TraceTest\\TracerInterface":   filePath,
+			"App\\Service\\TraceTest\\Span":              filePath,
 			"App\\Service\\TraceTest\\FakeEntityManager": filePath,
 			"App\\Service\\TraceTest\\SuperService":      filePath,
 			"App\\Service\\TraceTest\\UnsafeService":     filePath,
-			"Doctrine\\ORM\\EntityManagerInterface":               filePath,
+			"Doctrine\\ORM\\EntityManagerInterface":      filePath,
 		},
 		Container: &symbol.SymfonyContainer{
 			Definitions: map[string]symbol.SymfonyService{
@@ -539,6 +539,49 @@ func TestAuditor_TypeTrackingIntegrationFixture(t *testing.T) {
 		if !strings.Contains(f.Snippet, "disable") {
 			t.Errorf("Expected finding snippet to contain 'disable', got: %s (Message: %s)", f.Snippet, f.Message)
 		}
+	}
+}
+
+func TestAuditor_InheritedMethodReturnType(t *testing.T) {
+	a := NewAuditor(config.Config{})
+	filePath := filepath.Join("..", "..", "test", "fixtures", "doctrine_repository_test.php")
+
+	a.Symfony = &SymfonyBridge{
+		ClassToFile: map[string]string{
+			"App\\Repository\\ServiceEntityRepository": filePath,
+			"App\\Repository\\ProductRepository":       filePath,
+			"Doctrine\\ORM\\EntityManagerInterface":    filePath,
+		},
+		Container: &symbol.SymfonyContainer{
+			Definitions: map[string]symbol.SymfonyService{
+				"doctrine": {
+					Class:      "Doctrine\\Bundle\\DoctrineBundle\\Registry",
+					Resettable: true,
+				},
+				"Doctrine\\ORM\\EntityManagerInterface": {
+					Class:  "Doctrine\\ORM\\EntityManagerInterface",
+					Shared: true,
+				},
+				"App\\Repository\\ProductRepository": {
+					Class:  "App\\Repository\\ProductRepository",
+					Shared: true,
+				},
+			},
+		},
+	}
+
+	findings, err := a.Audit(filePath, nil)
+	if err != nil {
+		t.Fatalf("Audit failed: %v", err)
+	}
+
+	// We expect exactly 1 finding: on setUnsafeProperty in testUnsafeMutation()
+	if len(findings) != 1 {
+		t.Fatalf("Expected exactly 1 finding on doctrine_repository_test.php, got %d: %v", len(findings), findings)
+	}
+
+	if !strings.Contains(findings[0].Snippet, "setUnsafeProperty") {
+		t.Errorf("Expected finding snippet to be on setUnsafeProperty, got: %s", findings[0].Snippet)
 	}
 }
 

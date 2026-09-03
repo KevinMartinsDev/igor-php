@@ -1090,7 +1090,7 @@ class SuperService {
 
 	engine := &mockEngine{
 		methodReturnTypes: map[string]string{
-        "App\\Tracing\\TracerInterface::makeSpan": "OpenTelemetry\\API\\Trace\\Span",
+			"App\\Tracing\\TracerInterface::makeSpan":  "OpenTelemetry\\API\\Trace\\Span",
 			"App\\Service\\SomeSharedService::getSelf": "App\\Service\\SomeSharedService",
 		},
 	}
@@ -1261,6 +1261,72 @@ function freeFunction(): void {}`
 	}
 }
 
+func TestPHPVisitor_Issue59_Fixes(t *testing.T) {
+	code := `<?php
+class DoctrineAndChainedDemo {
+    private \Doctrine\ORM\EntityManager $em;
+    private \App\Service\MyFactoryClass $factory;
+
+    public function __construct(\Doctrine\ORM\EntityManager $em, \App\Service\MyFactoryClass $factory) {
+        $this->em = $em;
+        $this->factory = $factory;
+    }
+
+    public function testResettableLocalVariable() {
+        $manager = $this->em;
+        $manager->remove($product); // Safe: $manager has type EntityManager (resettable) and remove is a UnitOfWork lifecycle method
+    }
+
+    public function testResettableLocalVariableFromMethod() {
+        $manager = $this->getEntityManager();
+        $manager->remove($product); // Safe: $manager type resolved from getEntityManager() return type and is resettable
+    }
+
+    public function getEntityManager(): \Doctrine\ORM\EntityManager {
+        return $this->em;
+    }
+
+    public function testChainedCallsOnNonSharedService() {
+        // Safe: MyFactoryClass::wrap() returns MyWrapper (which contains "dto" and is not a shared service)
+        $this->factory->wrap()->setAttribute('k', 'v'); 
+    }
+
+    public function testChainedCallsOnSharedService() {
+        // Unsafe: MyFactoryClass::getSharedReceiver() returns AnotherSharedService (shared service!)
+        $this->factory->getSharedReceiver()->setAttribute('k', 'v'); 
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockEngine{
+		methodReturnTypes: map[string]string{
+			"DoctrineAndChainedDemo::getEntityManager":        "Doctrine\\ORM\\EntityManager",
+			"App\\Service\\MyFactoryClass::wrap":              "App\\ValueObject\\MyWrapperDto",
+			"App\\Service\\MyFactoryClass::getSharedReceiver": "App\\Service\\AnotherSharedService",
+		},
+	}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+
+	// We expect exactly 1 finding: for the chained call on the shared service.
+	// The other three cases (resettable local variable, resettable from method call, and non-shared chained call) should pass!
+	if len(findings) != 1 {
+		t.Fatalf("Expected exactly 1 finding, got %d: %v", len(findings), findings)
+	}
+
+	if !strings.Contains(findings[0].Snippet, "getSharedReceiver()->setAttribute") {
+		t.Errorf("Expected finding to be on getSharedReceiver()->setAttribute, got: %s", findings[0].Snippet)
+	}
+}
+
 func TestPHPVisitor_DestructorDetection(t *testing.T) {
 	code := `<?php
 class SharedService {
@@ -1300,7 +1366,7 @@ class SafeMethodService {
 	// Engine configuration where TransientService is explicitly non-shared
 	engine := &mockEngine{}
 	v := NewVisitor(content, engine)
-	
+
 	// Set TransientService as non-shared
 	nonShared := make(NonSharedServiceMap)
 	nonShared["TransientService"] = true
@@ -1324,5 +1390,38 @@ class SafeMethodService {
 	}
 	if !strings.Contains(finding.Remediation, "Destructors") {
 		t.Errorf("Expected remediation to mention Destructors, got: %s", finding.Remediation)
+	}
+}
+
+func TestPHPVisitor_DependencyInSafeNamespace_BypassesMutation(t *testing.T) {
+	code := `<?php
+class ServiceWithSafeDependency {
+    private \Symfony\Component\HttpClient\CachingHttpClient $client;
+
+    public function __construct(\Symfony\Component\HttpClient\CachingHttpClient $client) {
+        $this->client = $client;
+    }
+
+    public function testMutate() {
+        $this->client->setSomeOption('val'); // Safe because CachingHttpClient is in a safe namespace
+    }
+}`
+	content := []byte(code)
+
+	p := sitter.NewParser()
+	lang := sitter.NewLanguage(php.LanguagePHP())
+	_ = p.SetLanguage(lang)
+	tree := p.Parse(content, nil)
+	defer tree.Close()
+
+	engine := &mockSafeNamespaceEngine{
+		safeNamespace: "Symfony\\Component\\HttpClient\\CachingHttpClient",
+	}
+	v := NewVisitor(content, engine)
+	v.Walk(tree.RootNode())
+
+	findings := v.Findings()
+	if len(findings) > 0 {
+		t.Errorf("Expected 0 findings when dependency is in a safe namespace, got %d: %v", len(findings), findings)
 	}
 }
